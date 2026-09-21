@@ -1,0 +1,30 @@
+[project]
+name = "archscan"
+version = "0.1.0"
+authors = [
+    { name = "Ilia Ilmer", email = "contact@iliailmer.com" }
+]
+requires-python = ">=3.12.9"
+dependencies = [
+    "loguru>=0.7.3",
+    "networkx>=3.6.1",
+    "python-dotenv>=1.2.3",
+    "tree-sitter>=0.26.0",
+    "tree-sitter-python>=0.25.0",
+    "typesafe-sdk>=0.7.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.17,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[project.scripts]
+archscan = "archscan.cli:main"
