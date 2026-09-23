@@ -3,27 +3,31 @@ from pathlib import Path
 import tree_sitter_python
 from tree_sitter import Language, Node, Parser
 
-from archscan.graph import Module, ProjectGraph
+from archscan.graph import AssignOp, Function, Module, ProjectGraph
+from archscan.scan.python_functions import extract_functions
+from archscan.settings import DEFAULT_SKIP_DIRS
 
-SKIP_DIRS = {".venv", "venv", "__pycache__", ".git", "node_modules", ".tox", "build", "dist"}
 RISK_CALLS = {"eval", "exec", "compile", "os.system", "pickle.loads", "yaml.load"}
 RISK_PREFIXES = ("subprocess.",)
 
 _parser = Parser(Language(tree_sitter_python.language()))
 
 
-def scan(root: Path) -> ProjectGraph:
+def scan(root: Path, skip: set[str] | None = None) -> ProjectGraph:
+    skip = DEFAULT_SKIP_DIRS if skip is None else skip
     project = ProjectGraph(root)
     sources: dict[str, bytes] = {}
     is_package: dict[str, bool] = {}
     for path in sorted(root.rglob("*.py")):
         rel = path.relative_to(root)
-        if SKIP_DIRS & set(rel.parts):
+        hit = next((part for part in rel.parts if part in skip), None)
+        if hit:
+            project.skipped[hit] = project.skipped.get(hit, 0) + 1
             continue
         name, package = _module_name(rel)
         sources[name] = path.read_bytes()
         is_package[name] = package
-        project.add_module(Module(name=name, path=rel, language="python"))
+        project.add_module(Module(name=name, path=rel, language="python", is_test=is_test_path(rel)))
 
     for name, source in sources.items():
         module = project.module(name)
@@ -39,7 +43,22 @@ def scan(root: Path) -> ProjectGraph:
                     module.external_imports.append(imp[1])
         module.entry_points = _entry_points(tree.root_node)
         module.risks = _risks(tree.root_node)
+        module.bindings = _bindings(tree.root_node, name, is_package[name], project)
+        functions = extract_functions(tree.root_node, name)
+        for fn in functions:
+            project.add_function(fn)
+        module.has_code = any(_is_code(fn) for fn in functions) or _has_definition(tree.root_node)
     return project
+
+
+def is_test_path(rel: Path) -> bool:
+    name = rel.name
+    return (
+        bool({"tests", "test"} & set(rel.parts))
+        or (name.startswith("test_") and name.endswith(".py"))
+        or name.endswith("_test.py")
+        or name == "conftest.py"
+    )
 
 
 def _module_name(rel: Path) -> tuple[str, bool]:
@@ -89,12 +108,7 @@ def _imports(root: Node) -> list[tuple[int, str, list[str]]]:
 
 def _resolve(imp: tuple[int, str, list[str]], current: str, package: bool, project: ProjectGraph) -> list[str]:
     level, module, names = imp
-    if level:
-        base = current.split(".")
-        if not package:
-            base = base[:-1]
-        base = base[: len(base) - (level - 1)]
-        module = ".".join(base + ([module] if module else []))
+    module = _absolute(level, module, current, package)
     found = _match(module, names, project)
     if found or level:
         return found
@@ -102,6 +116,67 @@ def _resolve(imp: tuple[int, str, list[str]], current: str, package: bool, proje
     if directory:
         return _match(f"{directory}.{module}", names, project)
     return []
+
+
+def _absolute(level: int, module: str, current: str, package: bool) -> str:
+    if not level:
+        return module
+    base = current.split(".")
+    if not package:
+        base = base[:-1]
+    base = base[: len(base) - (level - 1)]
+    return ".".join(base + ([module] if module else []))
+
+
+def _localize(module: str, current: str, package: bool, project: ProjectGraph) -> str:
+    """Resolve a script-style import of a sibling module, such as `import _common`."""
+    if not module or project.has_module(module):
+        return module
+    directory = current if package else current.rpartition(".")[0]
+    sibling = f"{directory}.{module}" if directory else module
+    return sibling if project.has_module(sibling) else module
+
+
+def _bindings(root: Node, current: str, package: bool, project: ProjectGraph) -> dict[str, str]:
+    """Map each name an import binds to the dotted name it refers to."""
+    bound: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type == "import_statement":
+            for child in node.named_children:
+                if child.type == "aliased_import":
+                    name = _text(child.child_by_field_name("name"))
+                    bound[_text(child.child_by_field_name("alias"))] = _localize(name, current, package, project)
+                else:
+                    name = _text(child)
+                    if "." in name:
+                        bound[name.split(".")[0]] = name.split(".")[0]
+                    else:
+                        bound[name] = _localize(name, current, package, project)
+        elif node.type == "import_from_statement":
+            module_node = node.child_by_field_name("module_name")
+            level, module = 0, ""
+            if module_node is not None:
+                text = _text(module_node)
+                if module_node.type == "relative_import":
+                    level = len(text) - len(text.lstrip("."))
+                    module = text.lstrip(".")
+                else:
+                    module = text
+            module = _absolute(level, module, current, package)
+            if not level:
+                module = _localize(module, current, package, project)
+            for child in node.children_by_field_name("name"):
+                if child.type == "aliased_import":
+                    name = _text(child.child_by_field_name("name"))
+                    alias = _text(child.child_by_field_name("alias"))
+                else:
+                    name = alias = _text(child)
+                bound[alias] = f"{module}.{name}" if module else name
+        else:
+            stack.extend(node.children)
+    return bound
 
 
 def _match(module: str, names: list[str], project: ProjectGraph) -> list[str]:
@@ -128,6 +203,22 @@ def _entry_points(root: Node) -> list[str]:
                     if any(k in text for k in (".get(", ".post(", ".put(", ".delete(", ".patch(", ".route(")):
                         found.append(text.lstrip("@").strip())
     return found
+
+
+def _is_code(fn: Function) -> bool:
+    if fn.name != "<module>":
+        return True
+    return any(not (isinstance(op, AssignOp) and op.target == "__all__") for op in fn.ops)
+
+
+def _has_definition(root: Node) -> bool:
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type in ("function_definition", "class_definition"):
+            return True
+        stack.extend(node.children)
+    return False
 
 
 def _risks(root: Node) -> list[str]:

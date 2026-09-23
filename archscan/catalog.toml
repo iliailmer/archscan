@@ -1,0 +1,41 @@
+[[source]]
+kind = "cli"
+match = ["sys.argv", "input", "*.parse_args", "*.parse_known_args"]
+decorator = ["click.command", "click.group"]
+
+[[source]]
+kind = "env"
+match = ["os.getenv", "os.environ", "os.environ.get", "dotenv.dotenv_values"]
+
+[[source]]
+kind = "file"
+match = ["open", "*.read", "*.read_text", "*.read_bytes", "*.readline", "*.readlines", "pickle.load", "json.load", "yaml.safe_load", "numpy.load"]
+
+[[source]]
+kind = "network"
+match = ["requests.get", "requests.post", "requests.request", "httpx.get", "httpx.post", "urllib.request.urlopen", "*.recv", "*.recvfrom"]
+decorator = ["*.get", "*.post", "*.put", "*.delete", "*.patch", "*.route", "*.websocket"]
+
+[[source]]
+kind = "database"
+match = ["*.fetchone", "*.fetchall", "*.fetchmany"]
+
+[[sink]]
+kind = "file"
+match = ["*.write", "*.write_text", "*.write_bytes", "pickle.dump", "json.dump", "shutil.copy", "shutil.move", "numpy.save"]
+
+[[sink]]
+kind = "network"
+match = ["requests.*", "httpx.*", "urllib.request.urlopen", "*.send", "*.sendall"]
+
+[[sink]]
+kind = "database"
+match = ["*.execute", "*.executemany", "*.executescript"]
+
+[[sink]]
+kind = "process"
+match = ["subprocess.*", "os.system", "os.popen", "eval", "exec", "compile"]
+
+[[sink]]
+kind = "log"
+match = ["print", "logging.*", "loguru.logger.*"]

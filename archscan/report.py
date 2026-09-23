@@ -2,18 +2,25 @@ import sys
 from collections import defaultdict
 from html import escape
 
+from archscan.coverage import Coverage, coverage_md, coverage_tab
 from archscan.graph import ProjectGraph
 from archscan.judge import Judgment
-
-MERMAID_ESM_URL = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+from archscan.trace import TraceResult
+from archscan.trace_report import (
+    active_traces,
+    color_for,
+    findings_md,
+    functions_html,
+    node_id as _node_id,
+    LIMITS,
+    page_html,
+    source_mermaid,
+    trace_tabs,
+)
 
 
 def _package(name: str) -> str:
     return name.rsplit(".", 1)[0] if "." in name else name
-
-
-def _node_id(name: str) -> str:
-    return "n_" + "".join(c if c.isalnum() else "_" for c in name)
 
 
 def _group(project: ProjectGraph, judgments: dict[str, Judgment]) -> dict[str, list[str]]:
@@ -71,7 +78,12 @@ def _details(project: ProjectGraph, judgments: dict[str, Judgment], name: str) -
     return "; ".join(parts)
 
 
-def render(project: ProjectGraph, judgments: dict[str, Judgment]) -> str:
+def render(
+    project: ProjectGraph,
+    judgments: dict[str, Judgment],
+    result: TraceResult | None = None,
+    coverage: Coverage | None = None,
+) -> str:
     by_role = _group(project, judgments)
     lines = [
         f"# archscan: {project.root.name}",
@@ -102,10 +114,30 @@ def render(project: ProjectGraph, judgments: dict[str, Judgment]) -> str:
     for package, users in sorted(third_party.items(), key=lambda item: (-len(item[1]), item[0])):
         lines.append(f"- `{package}` — {len(users)} modules")
     lines += ["", "### Standard library", "", ", ".join(f"`{p}`" for p in sorted(stdlib)), ""]
+    traces = active_traces(result)
+    if traces:
+        lines += ["## Data trace", "", LIMITS, ""]
+        for trace in traces:
+            diagram = source_mermaid(project, trace, color_for(trace.kind))
+            lines += [
+                f"### {trace.kind}",
+                "",
+                *(["```mermaid", diagram, "```"] if diagram else ["No modules reached by this source."]),
+                "",
+                *findings_md(trace),
+                "",
+            ]
+    if coverage is not None:
+        lines += coverage_md(coverage)
     return "\n".join(lines)
 
 
-def render_html(project: ProjectGraph, judgments: dict[str, Judgment]) -> str:
+def render_html(
+    project: ProjectGraph,
+    judgments: dict[str, Judgment],
+    result: TraceResult | None = None,
+    coverage: Coverage | None = None,
+) -> str:
     by_role = _group(project, judgments)
     sections = []
     for role, names in sorted(by_role.items()):
@@ -114,7 +146,9 @@ def render_html(project: ProjectGraph, judgments: dict[str, Judgment]) -> str:
             details = _details(project, judgments, name)
             suffix = f" — {escape(details)}" if details else ""
             path = escape(str(project.module(name).path))
-            items.append(f"<li><code>{escape(name)}</code> ({path}){suffix}</li>")
+            items.append(
+                f"<li><code>{escape(name)}</code> ({path}){suffix}{functions_html(project, name)}</li>"
+            )
         sections.append(f"<h3>{escape(role)}</h3><ul>{''.join(items)}</ul>")
     unconnected = "".join(
         f"<li><code>{escape(name)}</code> ({escape(str(project.module(name).path))})"
@@ -136,33 +170,16 @@ def render_html(project: ProjectGraph, judgments: dict[str, Judgment]) -> str:
         f"<table><tr><th>Package</th><th>Modules</th><th>Used by</th></tr>{rows}</table>"
         f"<h3>Standard library</h3><p>{stdlib_list}</p>"
     )
-    title = escape(project.root.name)
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>archscan: {title}</title>
-<style>
-  body {{ font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 70rem; padding: 0 1rem; }}
-  .diagram {{ overflow: auto; border: 1px solid #ccc; border-radius: 6px; padding: 1rem; }}
-  code {{ background: #f2f2f2; padding: 0 .25rem; border-radius: 3px; }}
-  table {{ border-collapse: collapse; }}
-  th, td {{ border: 1px solid #ccc; padding: .25rem .5rem; text-align: left; vertical-align: top; }}
-</style>
-</head>
-<body>
-<h1>archscan: {title}</h1>
-<h2>Flow</h2>
+    structure = f"""<h2>Flow</h2>
 <div class="diagram"><pre class="mermaid">
 {escape(_mermaid(project, by_role))}
 </pre></div>
 <h2>Modules</h2>
 {''.join(sections)}
 {dependencies}
-<script type="module">
-  import mermaid from "{MERMAID_ESM_URL}";
-  mermaid.initialize({{ startOnLoad: true, securityLevel: "strict" }});
-</script>
-</body>
-</html>
-"""
+<p>{escape(LIMITS)}</p>"""
+    tabs = trace_tabs(project, result)
+    tab = coverage_tab(coverage)
+    if tab:
+        tabs.append(tab)
+    return page_html(escape(project.root.name), structure, tabs)
