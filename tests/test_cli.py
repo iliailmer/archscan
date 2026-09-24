@@ -45,3 +45,11 @@ def test_bad_settings_file_exits_with_message(tmp_path, monkeypatch, content):
     with pytest.raises(SystemExit) as info:
         main()
     assert str(info.value).startswith("Invalid archscan.toml:")
+
+
+def test_bad_sources_toml_exits_with_message(tmp_path, monkeypatch):
+    (tmp_path / "sources.toml").write_text('[[source]]\nmatch = ["x"]\n')
+    monkeypatch.setattr(sys, "argv", ["archscan", str(tmp_path)])
+    with pytest.raises(SystemExit) as info:
+        main()
+    assert str(info.value).startswith("Invalid sources.toml:")

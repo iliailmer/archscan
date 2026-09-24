@@ -12,9 +12,11 @@ def _write(tmp_path, files):
 
 def test_analyze_returns_project_without_test_modules_and_env_trace(tmp_path, flow_files):
     _write(tmp_path, flow_files)
+    _write(tmp_path, {"tests/test_app.py": "def test_x():\n    pass\n"})
     analysis = analyze(tmp_path, judge=False)
 
-    assert not any(m.is_test for m in analysis.project.modules())
+    assert "tests.test_app" in {m.name for m in analysis.full.modules()}
+    assert "tests.test_app" not in {m.name for m in analysis.project.modules()}
     assert analysis.judgments == {}
     assert "env" in analysis.result.traces
     findings = analysis.result.traces["env"].findings

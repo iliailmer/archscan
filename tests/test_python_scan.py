@@ -68,6 +68,78 @@ def test_missing_settings_file_gives_defaults(tmp_path):
     assert load_scan_settings(tmp_path) == set(DEFAULT_SKIP_DIRS)
 
 
+def test_pyproject_scripts_become_entry_points(tmp_path):
+    make(tmp_path, {
+        "app/__init__.py": "",
+        "app/main.py": "def main():\n    pass\n",
+        "pyproject.toml": '[project.scripts]\napp = "app.main:main"\n',
+    })
+    project = scan(tmp_path)
+    assert "script app -> main" in project.module("app.main").entry_points
+
+
+def test_pyproject_scripts_resolve_src_layout_suffix(tmp_path):
+    make(tmp_path, {
+        "src/app/__init__.py": "",
+        "src/app/main.py": "def main():\n    pass\n",
+        "pyproject.toml": '[project.scripts]\napp = "app.main:main"\n',
+    })
+    project = scan(tmp_path)
+    assert "script app -> main" in project.module("src.app.main").entry_points
+
+
+def test_pyproject_missing_or_unparseable_is_ignored(tmp_path):
+    make(tmp_path, {"a.py": "", "pyproject.toml": "[project\n"})
+    project = scan(tmp_path)
+    assert project.module("a").entry_points == []
+
+
+def test_pyproject_scripts_as_a_list_is_ignored(tmp_path):
+    make(tmp_path, {
+        "a.py": "def a():\n    return 1\n",
+        "pyproject.toml": '[project]\nscripts = ["a", "b"]\n',
+    })
+    project = scan(tmp_path)
+    assert project.module("a").entry_points == []
+
+
+def test_pyproject_non_table_project_is_ignored(tmp_path):
+    make(tmp_path, {
+        "a.py": "def a():\n    return 1\n",
+        "pyproject.toml": 'project = "x"\n',
+    })
+    project = scan(tmp_path)
+    assert project.module("a").entry_points == []
+
+
+def test_pyproject_non_string_script_target_is_ignored(tmp_path):
+    make(tmp_path, {
+        "a.py": "def a():\n    return 1\n",
+        "pyproject.toml": "[project.scripts]\napp = 5\n",
+    })
+    project = scan(tmp_path)
+    assert project.module("a").entry_points == []
+
+
+def test_pyproject_bad_entry_next_to_good_entry_is_still_detected(tmp_path):
+    make(tmp_path, {
+        "app/__init__.py": "",
+        "app/main.py": "def main():\n    pass\n",
+        "pyproject.toml": '[project.scripts]\napp = "app.main:main"\nbad = 5\n',
+    })
+    project = scan(tmp_path)
+    assert "script app -> main" in project.module("app.main").entry_points
+
+
+def test_dunder_main_file_is_an_entry_point(tmp_path):
+    make(tmp_path, {
+        "pkg/__init__.py": "",
+        "pkg/__main__.py": "print('hi')\n",
+    })
+    project = scan(tmp_path)
+    assert "__main__" in project.module("pkg.__main__").entry_points
+
+
 def test_malformed_settings_file_raises(tmp_path):
     import tomllib
 

@@ -2,9 +2,10 @@ import json
 import sys
 
 from archscan.cli import main
-from archscan.export import SCHEMA_VERSION, to_json
+from archscan.export import SCHEMA_VERSION, to_json, trace_entry
 from archscan.judge import Judgment
 from archscan.pipeline import analyze
+from archscan.trace import Finding, SourceTrace
 
 TOP_LEVEL_KEYS = {"schema", "root", "summary", "modules", "functions", "traces", "coverage"}
 
@@ -38,6 +39,28 @@ def test_env_finding_appears_with_its_path(tmp_path, flow_files):
     assert finding["certain"] is True
 
 
+def test_trace_entry_path_ends_at_the_sink_function(tmp_path, flow_files):
+    for rel, text in flow_files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    analysis = analyze(tmp_path, judge=False)
+    finding = Finding(
+        source="env",
+        sink="process",
+        sink_call="subprocess.run",
+        function="app.runner.run",
+        line=4,
+        path=("app.main.main", "app.other.idle"),
+        certain=True,
+    )
+    trace = SourceTrace(kind="env", findings=[finding])
+
+    entry = trace_entry(analysis.project, trace)
+
+    assert entry["findings"][0]["path"][-1] == "app.runner.run"
+
+
 def test_no_tests_module_anywhere(tmp_path, flow_files):
     for rel, text in flow_files.items():
         path = tmp_path / rel
@@ -57,6 +80,19 @@ def test_no_tests_module_anywhere(tmp_path, flow_files):
     for fn in data["functions"]:
         assert not fn["module"].startswith("tests.")
         assert not fn["qualname"].startswith("tests.")
+
+
+def test_summary_entry_points_include_pyproject_scripts(tmp_path, flow_files):
+    for rel, text in flow_files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    (tmp_path / "pyproject.toml").write_text('[project.scripts]\napp = "app.main:main"\n')
+    analysis = analyze(tmp_path, judge=False)
+
+    data = to_json(analysis)
+
+    assert {"module": "app.main", "entry": "script app -> main"} in data["summary"]["entry_points"]
 
 
 def test_role_is_none_without_judgments(tmp_path, flow_files):

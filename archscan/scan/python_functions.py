@@ -51,8 +51,13 @@ class _Builder:
                 right = node.child_by_field_name("right")
                 if right is None:
                     return
-                names, guess = self.reads(right)
-                self._assign_to(node.child_by_field_name("left"), tuple(names), guess)
+                if right.type == "assignment":
+                    self.statement(right)
+                    names = self._target_names(right.child_by_field_name("left"))
+                    self._assign_to(node.child_by_field_name("left"), tuple(names), False)
+                else:
+                    names, guess = self.reads(right)
+                    self._assign_to(node.child_by_field_name("left"), tuple(names), guess)
             case "augmented_assignment":
                 left = node.child_by_field_name("left")
                 names, guess = self.reads(node.child_by_field_name("right"))
@@ -130,6 +135,8 @@ class _Builder:
                 return [self._call(node)], False
             case "lambda" | "function_definition" | "class_definition":
                 return [], False
+            case "list_comprehension" | "set_comprehension" | "dictionary_comprehension" | "generator_expression":
+                return self._comprehension(node)
             case _:
                 names: list[str] = []
                 guess = node.type in CONTAINER_TYPES
@@ -138,6 +145,19 @@ class _Builder:
                     names += child_names
                     guess = guess or child_guess
                 return names, guess
+
+    def _comprehension(self, node: Node) -> tuple[list[str], bool]:
+        children = node.named_children
+        body = children[0] if children else None
+        for child in children[1:]:
+            if child.type == "for_in_clause":
+                names, _ = self.reads(child.child_by_field_name("right"))
+                self._assign_to(child.child_by_field_name("left"), tuple(names), True)
+            elif child.type == "if_clause":
+                for condition in child.named_children:
+                    self.reads(condition)
+        names, _ = self.reads(body) if body is not None else ([], True)
+        return names, True
 
     def _call(self, node: Node) -> str:
         function = node.child_by_field_name("function")

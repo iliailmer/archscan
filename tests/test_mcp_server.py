@@ -96,6 +96,17 @@ def test_cache_returns_same_analysis_object(repo):
     assert first is second
 
 
+def test_cache_rescans_after_rename(repo):
+    mcp_server._analysis_for(str(repo))
+
+    (repo / "app" / "other.py").rename(repo / "app" / "renamed.py")
+
+    renamed = mcp_server.module(str(repo), "app.renamed")
+    old = mcp_server.module(str(repo), "app.other")
+    assert renamed.get("name") == "app.renamed"
+    assert old.get("error") == "unknown module"
+
+
 def test_cache_rescans_after_file_touch(repo):
     first = mcp_server._analysis_for(str(repo))
 
@@ -166,6 +177,14 @@ def test_archscan_toml_edits_trigger_a_rescan(repo):
     settings.write_text('[scan]\nskip = ["extra"]\n')
     _later(settings)
     assert "extra.x" not in json.dumps(mcp_server.search(str(repo), "extra"))
+
+
+def test_bad_sources_toml_returns_error(repo):
+    (repo / "sources.toml").write_text('[[source]]\nmatch = ["x"]\n')
+
+    result = mcp_server.overview(str(repo))
+
+    assert result["error"].startswith("Invalid sources.toml:")
 
 
 def test_unexpected_analysis_error_returns_error_dict(repo, monkeypatch):
