@@ -1,6 +1,8 @@
+import tomllib
 from pathlib import Path
 
 import tree_sitter_python
+from loguru import logger
 from tree_sitter import Language, Node, Parser
 
 from archscan.graph import AssignOp, Function, Module, ProjectGraph
@@ -42,13 +44,64 @@ def scan(root: Path, skip: set[str] | None = None) -> ProjectGraph:
                 if imp[0] == 0 and imp[1]:
                     module.external_imports.append(imp[1])
         module.entry_points = _entry_points(tree.root_node)
+        if module.path.name == "__main__.py" and "__main__" not in module.entry_points:
+            module.entry_points.append("__main__")
         module.risks = _risks(tree.root_node)
         module.bindings = _bindings(tree.root_node, name, is_package[name], project)
         functions = extract_functions(tree.root_node, name)
         for fn in functions:
             project.add_function(fn)
         module.has_code = any(_is_code(fn) for fn in functions) or _has_definition(tree.root_node)
+    _apply_pyproject_scripts(root, project)
     return project
+
+
+def _project_scripts(data: dict) -> list[tuple[str, str, str]]:
+    """Return (script name, module, function) from [project.scripts]/[project.gui-scripts].
+
+    Any wrong shape (a non-table `project`, a non-table scripts section, or a
+    non-string target) is treated as "no scripts" rather than raised: a
+    malformed pyproject.toml must never fail the scan.
+    """
+    project = data.get("project", {})
+    if not isinstance(project, dict):
+        logger.debug("Ignoring pyproject.toml [project]: not a table")
+        return []
+    found = []
+    for key in ("scripts", "gui-scripts"):
+        table = project.get(key, {})
+        if not isinstance(table, dict):
+            logger.debug("Ignoring pyproject.toml [project.{}]: not a table", key)
+            continue
+        for script_name, target in table.items():
+            if not isinstance(target, str):
+                logger.debug("Ignoring pyproject.toml script {!r}: target is not a string", script_name)
+                continue
+            module, _, func = target.partition(":")
+            found.append((script_name, module, func))
+    return found
+
+
+def _resolve_script_module(module: str, project: ProjectGraph) -> str | None:
+    if project.has_module(module):
+        return module
+    suffix = f".{module}"
+    matches = [m.name for m in project.modules() if m.name.endswith(suffix)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _apply_pyproject_scripts(root: Path, project: ProjectGraph) -> None:
+    path = root / "pyproject.toml"
+    if not path.is_file():
+        return
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError:
+        return
+    for script_name, module, func in _project_scripts(data):
+        resolved = _resolve_script_module(module, project)
+        if resolved is not None:
+            project.module(resolved).entry_points.append(f"script {script_name} -> {func}")
 
 
 def is_test_path(rel: Path) -> bool:

@@ -50,6 +50,13 @@ def _reached_modules(project: ProjectGraph, trace: SourceTrace) -> list[dict]:
     return [{"name": name, "certain": reached[name]} for name in sorted(reached)]
 
 
+def _finding_path(f) -> list[str]:
+    path = list(f.path)
+    if not path or path[-1] != f.function:
+        path.append(f.function)
+    return path
+
+
 def trace_entry(project: ProjectGraph, trace: SourceTrace) -> dict:
     return {
         "kind": trace.kind,
@@ -60,7 +67,7 @@ def trace_entry(project: ProjectGraph, trace: SourceTrace) -> dict:
                 "sink_call": f.sink_call,
                 "function": f.function,
                 "line": f.line,
-                "path": list(f.path),
+                "path": _finding_path(f),
                 "certain": f.certain,
             }
             for f in trace.findings

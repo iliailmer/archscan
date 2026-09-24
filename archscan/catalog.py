@@ -51,7 +51,10 @@ def load_catalog(project_root: Path | None = None) -> Catalog:
     if project_root is not None:
         extra = project_root / "sources.toml"
         if extra.is_file():
-            more_sources, more_sinks = _parse(extra.read_text())
+            try:
+                more_sources, more_sinks = _parse(extra.read_text())
+            except (tomllib.TOMLDecodeError, KeyError, TypeError) as error:
+                raise ValueError(f"Invalid sources.toml: {error}") from error
             sources += more_sources
             sinks += more_sinks
     return Catalog(tuple(sources), tuple(sinks))

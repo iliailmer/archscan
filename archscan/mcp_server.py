@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 import threading
@@ -13,7 +14,7 @@ from archscan.settings import load_scan_settings
 
 server = FastMCP("archscan")
 
-Signature = tuple[int, float, float | None, float | None]
+Signature = tuple[str, float | None, float | None]
 
 _cache: dict[Path, tuple[Signature, Analysis]] = {}
 _lock = threading.Lock()
@@ -27,20 +28,23 @@ def _config_mtime(root: Path, name: str) -> float | None:
 
 
 def _signature(root: Path, skip: set[str]) -> Signature:
-    """Count `.py` files not skipped by the scan, the newest mtime among them,
-    and the mtimes of `archscan.toml`/`sources.toml` (None when absent), so
-    editing either config file also triggers a rescan.
+    """Hash of each `.py` file not skipped by the scan (path, mtime, size), plus
+    the mtimes of `archscan.toml`/`sources.toml` (None when absent), so a
+    rename, an edit, or editing either config file all trigger a rescan.
     """
-    count = 0
-    newest = 0.0
-    for path in root.rglob("*.py"):
-        rel = path.relative_to(root)
-        if any(part in skip for part in rel.parts):
-            continue
-        count += 1
-        newest = max(newest, path.stat().st_mtime)
+    entries = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip]
+        for filename in filenames:
+            if not filename.endswith(".py"):
+                continue
+            path = Path(dirpath) / filename
+            rel = path.relative_to(root)
+            stat = path.stat()
+            entries.append((str(rel), stat.st_mtime_ns, stat.st_size))
+    digest = hashlib.sha256(repr(sorted(entries)).encode()).hexdigest()
     configs = tuple(_config_mtime(root, name) for name in _CONFIG_FILES)
-    return (count, newest, *configs)
+    return (digest, *configs)
 
 
 def _analysis_for(path: str) -> Analysis | dict:
@@ -143,10 +147,12 @@ def trace(path: str, kind: str, limit: int = query.DEFAULT_LIMIT) -> dict:
     through the call graph to risky sinks.
 
     Returns the modules the trace reaches and the findings (sink, call site,
-    call path). An unknown `kind` returns the valid kinds for this repo. The
-    `modules` and `findings` lists are each capped at `limit` (default 50)
-    independently; when either is cut, `<field>_truncated` is true and
-    `<field>_total` gives the full count.
+    and path). `path`: functions the value passed through, in order, via
+    calls and returns; ends at `function`. Not a call chain; use
+    `path_between` for that. An unknown `kind` returns the valid kinds for
+    this repo. The `modules` and `findings` lists are each capped at `limit`
+    (default 50) independently; when either is cut, `<field>_truncated` is
+    true and `<field>_total` gives the full count.
     """
     analysis = _analysis_for(path)
     if isinstance(analysis, dict):

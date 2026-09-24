@@ -86,6 +86,21 @@ def test_overview_truncates_packages(analysis):
     assert result["total"] == 2
 
 
+def test_overview_truncates_entry_points(tmp_path):
+    files = {
+        "a.py": "if __name__ == '__main__':\n    pass\n",
+        "b.py": "if __name__ == '__main__':\n    pass\n",
+    }
+    for rel, text in files.items():
+        (tmp_path / rel).write_text(text)
+    analysis = analyze(tmp_path, judge=False)
+
+    result = query.overview(analysis, limit=1)
+
+    assert result["summary"]["entry_points_truncated"] is True
+    assert result["summary"]["entry_points_total"] == 2
+
+
 def test_overview_excludes_test_modules(analysis):
     result = query.overview(analysis)
 
@@ -111,6 +126,19 @@ def test_module_unknown_name_suggests_close_matches(analysis):
     assert result["error"] == "unknown module"
     assert "app.main" in result["suggestions"]
     assert len(result["suggestions"]) <= 5
+
+
+def test_module_resolves_unique_dotted_suffix(analysis):
+    result = query.module(analysis, "runner")
+
+    assert result["name"] == "app.runner"
+
+
+def test_module_unknown_suffix_returns_suggestions(analysis):
+    result = query.module(analysis, "runer")
+
+    assert result["error"] == "unknown module"
+    assert result["suggestions"]
 
 
 def test_module_truncates_functions(analysis):
@@ -159,10 +187,25 @@ def test_callers_unknown_suffix_suggests_close_matches(analysis):
     assert "suggestions" in result
 
 
+def test_callers_short_typo_gets_suggestions_from_last_segment(analysis):
+    result = query.callers(analysis, "runr")
+
+    assert result["error"] == "unknown function"
+    assert result["suggestions"]
+
+
 def test_callers_of_run_is_main(analysis):
     result = query.callers(analysis, "app.runner.run")
 
     assert result["callers"] == [{"function": "app.main.main", "certain": True}]
+
+
+def test_callees_negative_limit_gives_empty_list(analysis):
+    result = query.callees(analysis, "app.main.main", limit=-1)
+
+    assert result["callees"] == []
+    assert result["truncated"] is True
+    assert result["total"] == 2
 
 
 def test_callees_truncates(analysis):

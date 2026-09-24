@@ -186,19 +186,28 @@ def judge_project(
                 return
         try:
             response = client().system_one(state=state, questions=QUESTIONS, model=model)
-            role = response.choices["role"]
-            auth = response.nouls["handles_auth"].noul
-            used_in = response.usage.input_tokens or 0
-            used_out = response.usage.output_tokens or 0
         except Exception as error:
             logger.warning("Judging {} failed: {}", module.name, error)
             finish(module, _judgment("unknown", 0.0, 0.0, derived), "failed")
             return
-        logger.debug("{}: role={} in={} out={}", module.name, role.choice, used_in, used_out)
+
+        used_in = response.usage.input_tokens or 0
+        used_out = response.usage.output_tokens or 0
         with lock:
             usage.input_tokens += used_in
             usage.output_tokens += used_out
             usage.calls += 1
+
+        try:
+            role = response.choices["role"]
+            auth = response.nouls["handles_auth"].noul
+        except Exception as error:
+            logger.warning("Judging {} failed: {}", module.name, error)
+            finish(module, _judgment("unknown", 0.0, 0.0, derived), "failed")
+            return
+
+        logger.debug("{}: role={} in={} out={}", module.name, role.choice, used_in, used_out)
+        with lock:
             new_entries[key] = {"role": role.choice, "role_confidence": role.confidence, "handles_auth": auth}
         finish(module, _judgment(role.choice, role.confidence, auth, derived), "called")
 

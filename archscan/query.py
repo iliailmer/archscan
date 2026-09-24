@@ -10,6 +10,7 @@ CLOSE_MATCHES = 5
 
 
 def _cap(items: list, limit: int) -> tuple[list, bool, int]:
+    limit = max(limit, 0)
     total = len(items)
     return items[:limit], total > limit, total
 
@@ -39,21 +40,43 @@ def _paginate_field(result: dict, key: str, limit: int) -> dict:
     return result
 
 
-def _resolve_function(nodes: list[str], name: str) -> str | dict:
-    """Resolve a full qualname or a unique dotted suffix to a full qualname."""
-    if name in nodes:
+def _suggest(name: str, names: list[str]) -> list[str]:
+    """Close matches on full names, then names whose last dotted segment is a
+    close match or contains `name`."""
+    matches = difflib.get_close_matches(name, names, n=CLOSE_MATCHES)
+    if matches:
+        return matches
+    found = []
+    for n in names:
+        last = n.rpartition(".")[2]
+        if name in last or difflib.get_close_matches(name, [last], n=1):
+            found.append(n)
+            if len(found) == CLOSE_MATCHES:
+                break
+    return found
+
+
+def _resolve(names: list[str], name: str, limit: int, *, kind: str) -> str | dict:
+    """Resolve a full name or a unique dotted suffix to a full name."""
+    if name in names:
         return name
-    matches = sorted(n for n in nodes if n.endswith(f".{name}"))
+    matches = sorted(n for n in names if n.endswith(f".{name}"))
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        return {"error": "ambiguous", "matches": matches}
-    suggestions = difflib.get_close_matches(name, nodes, n=CLOSE_MATCHES)
-    return {"error": "unknown function", "suggestions": suggestions}
+        return _paginate({"error": "ambiguous", "matches": matches}, "matches", limit)
+    suggestions = _suggest(name, names)
+    return {"error": f"unknown {kind}", "suggestions": suggestions}
+
+
+def _resolve_function(nodes: list[str], name: str, limit: int = DEFAULT_LIMIT) -> str | dict:
+    return _resolve(nodes, name, limit, kind="function")
 
 
 def overview(a: Analysis, limit: int = DEFAULT_LIMIT) -> dict:
     summary = to_json(a)["summary"]
+    summary = _paginate_field(summary, "entry_points", limit)
+    summary = _paginate_field(summary, "third_party", limit)
     packages: dict[str, dict] = {}
     for module in sorted(a.project.modules(), key=lambda m: m.name):
         top = module.name.split(".", 1)[0]
@@ -68,17 +91,17 @@ def overview(a: Analysis, limit: int = DEFAULT_LIMIT) -> dict:
 
 def module(a: Analysis, name: str, limit: int = DEFAULT_LIMIT) -> dict:
     project = a.project
-    if not project.has_module(name):
-        names = sorted(m.name for m in project.modules())
-        suggestions = difflib.get_close_matches(name, names, n=CLOSE_MATCHES)
-        return {"error": "unknown module", "suggestions": suggestions}
-    entry = module_entry(project, a.judgments, name)
+    names = sorted(m.name for m in project.modules())
+    resolved = _resolve(names, name, limit, kind="module")
+    if isinstance(resolved, dict):
+        return resolved
+    entry = module_entry(project, a.judgments, resolved)
     functions = sorted(
-        (fn for fn in project.functions() if fn.module == name), key=lambda f: f.qualname
+        (fn for fn in project.functions() if fn.module == resolved), key=lambda f: f.qualname
     )
     entry["functions"] = [
         {
-            "name": fn.qualname.removeprefix(f"{name}."),
+            "name": fn.qualname.removeprefix(f"{resolved}."),
             "line": fn.line,
             "calls": project.calls.out_degree(fn.qualname) if project.calls.has_node(fn.qualname) else 0,
         }
@@ -89,7 +112,7 @@ def module(a: Analysis, name: str, limit: int = DEFAULT_LIMIT) -> dict:
 
 def _call_edges(a: Analysis, function: str, limit: int, *, direction: str) -> dict:
     calls = a.project.calls
-    resolved = _resolve_function(list(calls.nodes), function)
+    resolved = _resolve_function(list(calls.nodes), function, limit)
     if isinstance(resolved, dict):
         return resolved
     edges = calls.in_edges(resolved, data=True) if direction == "in" else calls.out_edges(resolved, data=True)

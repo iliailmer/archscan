@@ -223,6 +223,33 @@ def test_invalid_workers_fall_back(monkeypatch, value):
     assert judge._workers() == judge.DEFAULT_WORKERS
 
 
+def test_parse_failure_after_successful_call_still_counts_tokens(build, catalog, monkeypatch):
+    class BadResponse:
+        choices: dict = {}
+        nouls: dict = {}
+        usage = SimpleNamespace(input_tokens=IN_TOKENS, output_tokens=OUT_TOKENS)
+
+    class BadClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def system_one(self, state, questions, model):
+            return BadResponse()
+
+    monkeypatch.setattr(judge, "TypeSafeClient", BadClient)
+    project = build({"a.py": "def a():\n    return 1\n"})
+
+    judgments, usage = run(project, catalog)
+
+    assert judgments["a"].role == "unknown"
+    assert usage.calls == 1
+    assert usage.input_tokens == IN_TOKENS
+    assert usage.output_tokens == OUT_TOKENS
+
+
 def test_failure_gives_unknown_and_is_not_cached(build, catalog, fake):
     project = build(
         {

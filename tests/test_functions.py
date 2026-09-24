@@ -130,6 +130,21 @@ def test_nested_functions_are_registered_with_locals_qualnames(build):
     assert project.has_function("m.C.method.<locals>.inner.<locals>.deeper")
 
 
+def test_comprehension_if_clause_reads_are_tracked(build):
+    project = build({
+        "app/__init__.py": "",
+        "app/main.py": dedent("""\
+            import os
+
+            def f(items):
+                return [x for x in items if check(os.environ["Z"])]
+            """),
+    })
+    fn = project.function("app.main.f")
+    call = next(op for op in fn.ops if isinstance(op, CallOp) and op.callee == "check")
+    assert call.args == (("os.environ",),)
+
+
 def test_redefined_method_keeps_the_first_definition(build):
     project = build({
         "m.py": dedent("""\

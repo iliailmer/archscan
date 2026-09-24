@@ -274,6 +274,37 @@ def test_two_sink_calls_on_one_line_are_two_findings(build):
     assert len(findings) == 2
 
 
+def test_chained_assignment_is_tracked(build):
+    project = build({
+        "m.py": dedent("""\
+            import os
+            import subprocess
+
+            def f():
+                a = b = os.environ["X"]
+                subprocess.run(b)
+            """),
+    })
+    findings = run_trace(project).traces["env"].findings
+    assert findings
+    assert findings[0].sink_call == "subprocess.run"
+
+
+def test_comprehension_variable_is_tracked(build):
+    project = build({
+        "m.py": dedent("""\
+            import os
+            import subprocess
+
+            def f():
+                [subprocess.run(x) for x in os.environ["Y"].split(",")]
+            """),
+    })
+    findings = run_trace(project).traces["env"].findings
+    assert findings
+    assert findings[0].certain is False
+
+
 def test_nested_function_flow_is_reported(build):
     project = build({
         "m.py": dedent("""\
