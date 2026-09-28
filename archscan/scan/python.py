@@ -2,21 +2,22 @@ import tomllib
 from pathlib import Path
 
 import tree_sitter_python
-from loguru import logger
 from tree_sitter import Language, Node, Parser
 
+from archscan.callgraph import qualify
+from archscan.catalog import Catalog, load_catalog
 from archscan.graph import AssignOp, Function, Module, ProjectGraph
-from archscan.scan.python_functions import extract_functions
+from archscan.scan.python_functions import _text, extract_functions
 from archscan.settings import DEFAULT_SKIP_DIRS
-
-RISK_CALLS = {"eval", "exec", "compile", "os.system", "pickle.loads", "yaml.load"}
-RISK_PREFIXES = ("subprocess.",)
 
 _parser = Parser(Language(tree_sitter_python.language()))
 
+Import = tuple[int, str, list[tuple[str, str]]]
 
-def scan(root: Path, skip: set[str] | None = None) -> ProjectGraph:
+
+def scan(root: Path, skip: set[str] | None = None, catalog: Catalog | None = None) -> ProjectGraph:
     skip = DEFAULT_SKIP_DIRS if skip is None else skip
+    catalog = load_catalog() if catalog is None else catalog
     project = ProjectGraph(root)
     sources: dict[str, bytes] = {}
     is_package: dict[str, bool] = {}
@@ -29,29 +30,32 @@ def scan(root: Path, skip: set[str] | None = None) -> ProjectGraph:
         name, package = _module_name(rel)
         sources[name] = path.read_bytes()
         is_package[name] = package
-        project.add_module(Module(name=name, path=rel, language="python", is_test=is_test_path(rel)))
+        project.add_module(Module(name=name, path=rel, is_test=is_test_path(rel)))
 
     for name, source in sources.items():
         module = project.module(name)
         tree = _parser.parse(source)
-        for imp in _imports(tree.root_node):
+        imports = _imports(tree.root_node)
+        for imp in imports:
+            level, imp_module, entries = imp
             targets = _resolve(imp, name, is_package[name], project)
             if targets:
                 for target in targets:
                     if target != name:
                         project.add_dependency(name, target)
-            else:
-                if imp[0] == 0 and imp[1]:
-                    module.external_imports.append(imp[1])
+            elif level == 0:
+                external = imp_module or (entries[0][0] if entries else "")
+                if external:
+                    module.external_imports.append(external)
         module.entry_points = _entry_points(tree.root_node)
         if module.path.name == "__main__.py" and "__main__" not in module.entry_points:
             module.entry_points.append("__main__")
-        module.risks = _risks(tree.root_node)
-        module.bindings = _bindings(tree.root_node, name, is_package[name], project)
+        module.bindings = _bindings(imports, name, is_package[name], project)
+        module.risks = _risks(tree.root_node, module.bindings, catalog)
         functions = extract_functions(tree.root_node, name)
         for fn in functions:
             project.add_function(fn)
-        module.has_code = any(_is_code(fn) for fn in functions) or _has_definition(tree.root_node)
+        module.has_code = any(_is_code(fn) for fn in functions) or _has_top_class(tree.root_node)
     _apply_pyproject_scripts(root, project)
     return project
 
@@ -63,19 +67,14 @@ def _project_scripts(data: dict) -> list[tuple[str, str, str]]:
     non-string target) is treated as "no scripts" rather than raised: a
     malformed pyproject.toml must never fail the scan.
     """
-    project = data.get("project", {})
-    if not isinstance(project, dict):
-        logger.debug("Ignoring pyproject.toml [project]: not a table")
-        return []
     found = []
     for key in ("scripts", "gui-scripts"):
-        table = project.get(key, {})
-        if not isinstance(table, dict):
-            logger.debug("Ignoring pyproject.toml [project.{}]: not a table", key)
+        try:
+            items = list(data["project"][key].items())
+        except (KeyError, TypeError, AttributeError):
             continue
-        for script_name, target in table.items():
+        for script_name, target in items:
             if not isinstance(target, str):
-                logger.debug("Ignoring pyproject.toml script {!r}: target is not a string", script_name)
                 continue
             module, _, func = target.partition(":")
             found.append((script_name, module, func))
@@ -121,21 +120,29 @@ def _module_name(rel: Path) -> tuple[str, bool]:
     return ".".join(parts), False
 
 
-def _text(node: Node) -> str:
-    return node.text.decode() if node.text else ""
+def _name_alias(child: Node) -> tuple[str, str]:
+    """Return (imported name, bound alias) for one `import`/`from` target."""
+    if child.type == "aliased_import":
+        return _text(child.child_by_field_name("name")), _text(child.child_by_field_name("alias"))
+    text = _text(child)
+    return text, text
 
 
-def _imports(root: Node) -> list[tuple[int, str, list[str]]]:
-    """Return (relative level, module, imported names) per import statement."""
-    found: list[tuple[int, str, list[str]]] = []
+def _imports(root: Node) -> list[Import]:
+    """Return (relative level, module, [(imported name, bound alias)]) per import.
+
+    For `import a.b [as c]`, module is "" and the single entry's name is the
+    full dotted target ("a.b"); an unaliased entry has name == alias. For
+    `from mod import a [as b], ...` (or `from mod import *`, entries empty),
+    module is the "from" target.
+    """
+    found: list[Import] = []
     stack = [root]
     while stack:
         node = stack.pop()
         if node.type == "import_statement":
             for child in node.named_children:
-                target = child.child_by_field_name("name") if child.type == "aliased_import" else child
-                if target is not None:
-                    found.append((0, _text(target), []))
+                found.append((0, "", [_name_alias(child)]))
         elif node.type == "import_from_statement":
             module_node = node.child_by_field_name("module_name")
             level, module = 0, ""
@@ -146,12 +153,9 @@ def _imports(root: Node) -> list[tuple[int, str, list[str]]]:
                     module = text.lstrip(".")
                 else:
                     module = _text(module_node)
-            names = []
-            for child in node.children_by_field_name("name"):
-                target = child.child_by_field_name("name") if child.type == "aliased_import" else child
-                if target is not None:
-                    names.append(_text(target))
-            if node.child(node.child_count - 1) is not None and _text(node.child(node.child_count - 1)) == "*":
+            names = [_name_alias(child) for child in node.children_by_field_name("name")]
+            last = node.child(node.child_count - 1)
+            if last is not None and _text(last) == "*":
                 names = []
             found.append((level, module, names))
         else:
@@ -159,16 +163,19 @@ def _imports(root: Node) -> list[tuple[int, str, list[str]]]:
     return found
 
 
-def _resolve(imp: tuple[int, str, list[str]], current: str, package: bool, project: ProjectGraph) -> list[str]:
-    level, module, names = imp
+def _resolve(imp: Import, current: str, package: bool, project: ProjectGraph) -> list[str]:
+    level, module, entries = imp
+    names = [name for name, _ in entries]
     module = _absolute(level, module, current, package)
     found = _match(module, names, project)
     if found or level:
         return found
     directory = current if package else current.rpartition(".")[0]
-    if directory:
+    if not directory:
+        return []
+    if module:
         return _match(f"{directory}.{module}", names, project)
-    return []
+    return [sibling for n in names if (sibling := _sibling(n, current, package, project)) is not None]
 
 
 def _absolute(level: int, module: str, current: str, package: bool) -> str:
@@ -181,54 +188,40 @@ def _absolute(level: int, module: str, current: str, package: bool) -> str:
     return ".".join(base + ([module] if module else []))
 
 
+def _sibling(name: str, current: str, package: bool, project: ProjectGraph) -> str | None:
+    """Resolve a script-style sibling module, such as `import _common`, to its
+    dotted package path, or None if no such sibling module exists."""
+    directory = current if package else current.rpartition(".")[0]
+    if not directory:
+        return None
+    candidate = f"{directory}.{name}"
+    return candidate if project.has_module(candidate) else None
+
+
 def _localize(module: str, current: str, package: bool, project: ProjectGraph) -> str:
-    """Resolve a script-style import of a sibling module, such as `import _common`."""
     if not module or project.has_module(module):
         return module
-    directory = current if package else current.rpartition(".")[0]
-    sibling = f"{directory}.{module}" if directory else module
-    return sibling if project.has_module(sibling) else module
+    return _sibling(module, current, package, project) or module
 
 
-def _bindings(root: Node, current: str, package: bool, project: ProjectGraph) -> dict[str, str]:
+def _bindings(imports: list[Import], current: str, package: bool, project: ProjectGraph) -> dict[str, str]:
     """Map each name an import binds to the dotted name it refers to."""
     bound: dict[str, str] = {}
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type == "import_statement":
-            for child in node.named_children:
-                if child.type == "aliased_import":
-                    name = _text(child.child_by_field_name("name"))
-                    bound[_text(child.child_by_field_name("alias"))] = _localize(name, current, package, project)
+    for level, module, entries in imports:
+        if not module and not level:
+            for name, alias in entries:
+                if name != alias:
+                    bound[alias] = _localize(name, current, package, project)
+                elif "." in name:
+                    bound[name.split(".")[0]] = name.split(".")[0]
                 else:
-                    name = _text(child)
-                    if "." in name:
-                        bound[name.split(".")[0]] = name.split(".")[0]
-                    else:
-                        bound[name] = _localize(name, current, package, project)
-        elif node.type == "import_from_statement":
-            module_node = node.child_by_field_name("module_name")
-            level, module = 0, ""
-            if module_node is not None:
-                text = _text(module_node)
-                if module_node.type == "relative_import":
-                    level = len(text) - len(text.lstrip("."))
-                    module = text.lstrip(".")
-                else:
-                    module = text
-            module = _absolute(level, module, current, package)
-            if not level:
-                module = _localize(module, current, package, project)
-            for child in node.children_by_field_name("name"):
-                if child.type == "aliased_import":
-                    name = _text(child.child_by_field_name("name"))
-                    alias = _text(child.child_by_field_name("alias"))
-                else:
-                    name = alias = _text(child)
-                bound[alias] = f"{module}.{name}" if module else name
-        else:
-            stack.extend(node.children)
+                    bound[name] = _localize(name, current, package, project)
+            continue
+        base = _absolute(level, module, current, package)
+        if not level:
+            base = _localize(base, current, package, project)
+        for name, alias in entries:
+            bound[alias] = f"{base}.{name}" if base else name
     return bound
 
 
@@ -264,17 +257,18 @@ def _is_code(fn: Function) -> bool:
     return any(not (isinstance(op, AssignOp) and op.target == "__all__") for op in fn.ops)
 
 
-def _has_definition(root: Node) -> bool:
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type in ("function_definition", "class_definition"):
+def _has_top_class(root: Node) -> bool:
+    """A top-level class makes a module non-empty even with no methods
+    (`extract_functions` only yields entries for function definitions)."""
+    for child in root.named_children:
+        definition = child.child_by_field_name("definition") if child.type == "decorated_definition" else child
+        if definition is not None and definition.type == "class_definition":
             return True
-        stack.extend(node.children)
     return False
 
 
-def _risks(root: Node) -> list[str]:
+def _risks(root: Node, bindings: dict[str, str], catalog: Catalog) -> list[str]:
+    """A call is a risk when its qualified name matches a `process` sink."""
     found = []
     stack = [root]
     while stack:
@@ -282,8 +276,8 @@ def _risks(root: Node) -> list[str]:
         if node.type == "call":
             fn = node.child_by_field_name("function")
             if fn is not None:
-                name = _text(fn)
-                if name in RISK_CALLS or name.startswith(RISK_PREFIXES):
-                    found.append(f"{name} (line {node.start_point[0] + 1})")
+                qualified = qualify(_text(fn), bindings)
+                if "process" in catalog.sink_kinds(qualified):
+                    found.append(f"{qualified} (line {node.start_point[0] + 1})")
         stack.extend(node.children)
     return sorted(found)

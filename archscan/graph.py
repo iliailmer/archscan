@@ -54,7 +54,6 @@ class Target:
 class Module:
     name: str
     path: Path
-    language: str
     external_imports: list[str] = field(default_factory=list)
     entry_points: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)

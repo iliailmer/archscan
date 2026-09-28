@@ -10,8 +10,6 @@ from pathlib import Path
 from loguru import logger
 from typesafe_sdk import Choice, Noul, TypeSafeClient
 
-from archscan.capabilities import derive_capabilities
-from archscan.catalog import Catalog
 from archscan.graph import Module, ProjectGraph
 
 ROLES = {
@@ -21,7 +19,6 @@ ROLES = {
     "config": "Holds settings or constants.",
     "utility": "Generic helpers used by other modules.",
     "ui": "Renders user interface or terminal output.",
-    "test": "Contains tests.",
 }
 
 QUESTIONS = {
@@ -31,19 +28,14 @@ QUESTIONS = {
 
 NOUL_THRESHOLD = 0.5
 DEFAULT_MODEL = "jev-latest"
-DEFAULT_WORKERS = 8
+WORKERS = 8
 CACHE_FILE = "judgments.json"
 
 
 @dataclass
 class Judgment:
     role: str
-    role_confidence: float
-    capabilities: dict[str, float]
-
-    @property
-    def active_capabilities(self) -> list[str]:
-        return [k for k, p in self.capabilities.items() if p >= NOUL_THRESHOLD]
+    handles_auth: float
 
 
 @dataclass
@@ -51,10 +43,6 @@ class TokenUsage:
     input_tokens: int = 0
     output_tokens: int = 0
     calls: int = 0
-
-    def cost(self, price_in: float, price_out: float) -> float:
-        """Cost in USD. Prices are USD per million tokens."""
-        return (self.input_tokens * price_in + self.output_tokens * price_out) / 1_000_000
 
 
 def _canonical(value: object) -> str:
@@ -77,10 +65,8 @@ def _cache_enabled() -> bool:
 
 def _cache_path() -> Path:
     override = os.getenv("ARCHSCAN_CACHE_DIR")
-    if override:
-        return Path(override) / CACHE_FILE
-    base = os.getenv("XDG_CACHE_HOME") or str(Path.home() / ".cache")
-    return Path(base) / "archscan" / CACHE_FILE
+    base = Path(override) if override else Path.home() / ".cache" / "archscan"
+    return base / CACHE_FILE
 
 
 def _load_cache(path: Path) -> dict[str, dict]:
@@ -111,14 +97,6 @@ def _save_cache(path: Path, entries: dict[str, dict]) -> None:
         logger.warning("Could not write judgment cache {}: {}", path, error)
 
 
-def _workers() -> int:
-    try:
-        workers = int(os.getenv("ARCHSCAN_WORKERS", ""))
-    except ValueError:
-        return DEFAULT_WORKERS
-    return workers if workers >= 1 else DEFAULT_WORKERS
-
-
 def _state(project: ProjectGraph, module: Module) -> dict:
     return {
         "module": module.name,
@@ -128,13 +106,8 @@ def _state(project: ProjectGraph, module: Module) -> dict:
     }
 
 
-def _judgment(role: str, confidence: float, auth: float, derived: dict[str, float]) -> Judgment:
-    return Judgment(role, confidence, {**derived, "handles_auth": auth})
-
-
 def judge_project(
     project: ProjectGraph,
-    catalog: Catalog,
     model: str = DEFAULT_MODEL,
 ) -> tuple[dict[str, Judgment], TokenUsage]:
     modules = project.modules()
@@ -144,7 +117,6 @@ def judge_project(
     local = threading.local()
     clients: list[TypeSafeClient] = []
     results: dict[str, Judgment] = {}
-    counts = {"cache": 0, "called": 0, "empty": 0, "failed": 0}
     done = 0
 
     cache_on = _cache_enabled()
@@ -152,11 +124,10 @@ def judge_project(
     cache = _load_cache(cache_path) if cache_on else {}
     new_entries: dict[str, dict] = {}
 
-    def finish(module: Module, judgment: Judgment, outcome: str) -> None:
+    def finish(module: Module, judgment: Judgment) -> None:
         nonlocal done
         with lock:
             results[module.name] = judgment
-            counts[outcome] += 1
             done += 1
             logger.info("Judged {} ({}/{})", module.name, done, total)
 
@@ -169,26 +140,25 @@ def judge_project(
         return local.client
 
     def work(module: Module) -> None:
-        derived = derive_capabilities(project, catalog, module.name)
         if not module.has_code:
-            finish(module, _judgment("package", 1.0, 0.0, derived), "empty")
+            finish(module, Judgment("package", 0.0))
             return
         state = _state(project, module)
         key = _cache_key(state, model)
         hit = cache.get(key)
         if hit is not None:
             try:
-                cached = _judgment(hit["role"], float(hit["role_confidence"]), float(hit["handles_auth"]), derived)
+                cached = Judgment(hit["role"], float(hit["handles_auth"]))
             except (KeyError, TypeError, ValueError):
                 cached = None
             if cached is not None:
-                finish(module, cached, "cache")
+                finish(module, cached)
                 return
         try:
             response = client().system_one(state=state, questions=QUESTIONS, model=model)
         except Exception as error:
             logger.warning("Judging {} failed: {}", module.name, error)
-            finish(module, _judgment("unknown", 0.0, 0.0, derived), "failed")
+            finish(module, Judgment("unknown", 0.0))
             return
 
         used_in = response.usage.input_tokens or 0
@@ -203,16 +173,16 @@ def judge_project(
             auth = response.nouls["handles_auth"].noul
         except Exception as error:
             logger.warning("Judging {} failed: {}", module.name, error)
-            finish(module, _judgment("unknown", 0.0, 0.0, derived), "failed")
+            finish(module, Judgment("unknown", 0.0))
             return
 
         logger.debug("{}: role={} in={} out={}", module.name, role.choice, used_in, used_out)
         with lock:
-            new_entries[key] = {"role": role.choice, "role_confidence": role.confidence, "handles_auth": auth}
-        finish(module, _judgment(role.choice, role.confidence, auth, derived), "called")
+            new_entries[key] = {"role": role.choice, "handles_auth": auth}
+        finish(module, Judgment(role.choice, auth))
 
     try:
-        with ThreadPoolExecutor(max_workers=_workers()) as pool:
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
             list(pool.map(work, modules))
     finally:
         for created in clients:
@@ -220,12 +190,4 @@ def judge_project(
 
     if cache_on and new_entries:
         _save_cache(cache_path, {**cache, **new_entries})
-    logger.info(
-        "Judged {} modules: {} from cache, {} called, {} empty, {} failed",
-        total,
-        counts["cache"],
-        counts["called"],
-        counts["empty"],
-        counts["failed"],
-    )
     return {m.name: results[m.name] for m in modules}, usage

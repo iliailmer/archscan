@@ -18,13 +18,19 @@ def main() -> None:
     parser.add_argument("path", type=Path)
     parser.add_argument("-o", "--output", type=Path, help="Write report to this file. Use .html for an HTML page.")
     parser.add_argument("--trace", metavar="KIND", help="Trace only this source kind, for example env.")
+    parser.add_argument(
+        "--with-jev", action="store_true", help="Classify module roles and auth handling with Jev. Needs TYPESAFE_API_KEY."
+    )
     args = parser.parse_args()
 
     logger.remove()
     logger.add(sys.stderr, level=os.getenv("ARCHSCAN_LOG", "INFO"), format="<level>{level: <7}</level> {message}")
 
+    if args.with_jev and not os.getenv("TYPESAFE_API_KEY"):
+        sys.exit("--with-jev needs TYPESAFE_API_KEY")
+
     try:
-        analysis = analyze(args.path, only=args.trace)
+        analysis = analyze(args.path, only=args.trace, judge=args.with_jev)
     except (ValueError, NotADirectoryError) as error:
         sys.exit(str(error))
 
@@ -32,7 +38,7 @@ def main() -> None:
         report = json.dumps(to_json(analysis), indent=1)
     else:
         render_fn = render_html if args.output and args.output.suffix == ".html" else render
-        report = render_fn(analysis.project, analysis.judgments, analysis.result, coverage=analysis.coverage)
+        report = render_fn(analysis.project, analysis.judgments, analysis.capabilities, analysis.result, coverage=analysis.coverage)
     if args.output:
         args.output.write_text(report)
         logger.info("Wrote {}", args.output)

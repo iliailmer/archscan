@@ -188,9 +188,31 @@ def test_bad_sources_toml_returns_error(repo):
 
 
 def test_unexpected_analysis_error_returns_error_dict(repo, monkeypatch):
-    def boom(root):
+    def boom(root, judge=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(mcp_server, "analyze", boom)
 
     assert mcp_server.overview(str(repo)) == {"error": "analysis failed: RuntimeError: boom"}
+
+
+def test_with_jev_env_without_api_key_skips_jev_and_warns_once(repo, monkeypatch):
+    from loguru import logger
+
+    from archscan import pipeline
+
+    def unreachable(*args, **kwargs):
+        raise AssertionError("judge_project should not be called without TYPESAFE_API_KEY")
+
+    monkeypatch.setenv("ARCHSCAN_WITH_JEV", "1")
+    monkeypatch.setattr(pipeline, "judge_project", unreachable)
+
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level="WARNING", format="{message}")
+    try:
+        result = mcp_server.module(str(repo), "app.main")
+    finally:
+        logger.remove(sink_id)
+
+    assert result["role"] is None
+    assert sum(1 for m in messages if "ARCHSCAN_WITH_JEV=1 needs TYPESAFE_API_KEY" in m) == 1

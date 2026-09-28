@@ -64,13 +64,12 @@ def _dependencies(project: ProjectGraph) -> tuple[dict[str, list[str]], dict[str
     return third_party, stdlib
 
 
-def _details(project: ProjectGraph, judgments: dict[str, Judgment], name: str) -> str:
+def _details(project: ProjectGraph, capabilities: dict[str, list[str]], name: str) -> str:
     module = project.module(name)
     parts = []
-    if name in judgments:
-        caps = judgments[name].active_capabilities
-        if caps:
-            parts.append("capabilities: " + ", ".join(caps))
+    caps = capabilities.get(name, [])
+    if caps:
+        parts.append("capabilities: " + ", ".join(caps))
     if module.entry_points:
         parts.append("entry: " + ", ".join(module.entry_points))
     if module.risks:
@@ -81,6 +80,7 @@ def _details(project: ProjectGraph, judgments: dict[str, Judgment], name: str) -
 def render(
     project: ProjectGraph,
     judgments: dict[str, Judgment],
+    capabilities: dict[str, list[str]],
     result: TraceResult | None = None,
     coverage: Coverage | None = None,
 ) -> str:
@@ -100,13 +100,13 @@ def render(
     for role, names in sorted(by_role.items()):
         lines += [f"### {role}", ""]
         for name in sorted(names):
-            details = _details(project, judgments, name)
+            details = _details(project, capabilities, name)
             suffix = f" — {details}" if details else ""
             lines.append(f"- `{name}` ({project.module(name).path}){suffix}")
         lines.append("")
     lines += ["## Not connected", "", "No internal imports in either direction.", ""]
     for name in _unconnected(project):
-        details = _details(project, judgments, name)
+        details = _details(project, capabilities, name)
         lines.append(f"- `{name}` ({project.module(name).path})" + (f" — {details}" if details else ""))
     lines.append("")
     third_party, stdlib = _dependencies(project)
@@ -135,6 +135,7 @@ def render(
 def render_html(
     project: ProjectGraph,
     judgments: dict[str, Judgment],
+    capabilities: dict[str, list[str]],
     result: TraceResult | None = None,
     coverage: Coverage | None = None,
 ) -> str:
@@ -143,7 +144,7 @@ def render_html(
     for role, names in sorted(by_role.items()):
         items = []
         for name in sorted(names):
-            details = _details(project, judgments, name)
+            details = _details(project, capabilities, name)
             suffix = f" — {escape(details)}" if details else ""
             path = escape(str(project.module(name).path))
             items.append(
@@ -152,7 +153,7 @@ def render_html(
         sections.append(f"<h3>{escape(role)}</h3><ul>{''.join(items)}</ul>")
     unconnected = "".join(
         f"<li><code>{escape(name)}</code> ({escape(str(project.module(name).path))})"
-        + (f" — {escape(_details(project, judgments, name))}" if _details(project, judgments, name) else "")
+        + (f" — {escape(_details(project, capabilities, name))}" if _details(project, capabilities, name) else "")
         + "</li>"
         for name in _unconnected(project)
     )

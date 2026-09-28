@@ -68,8 +68,8 @@ def test_overview_reports_role_counts_from_judgments(analysis):
     from archscan.judge import Judgment
 
     analysis.judgments = {
-        "app.main": Judgment(role="business_logic", role_confidence=0.9, capabilities={}),
-        "app.runner": Judgment(role="business_logic", role_confidence=0.9, capabilities={}),
+        "app.main": Judgment(role="business_logic", handles_auth=0.0),
+        "app.runner": Judgment(role="business_logic", handles_auth=0.0),
     }
 
     result = query.overview(analysis)

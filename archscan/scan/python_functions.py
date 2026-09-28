@@ -250,45 +250,44 @@ def _function(node: Node, module: str, class_name: str | None, decorators: list[
     )
 
 
-def _collect(node: Node, module: str, class_name: str | None, decorators: list[str], found: list[Function]) -> None:
+def _collect(
+    node: Node, module: str, class_name: str | None, outer: str | None, decorators: list[str], found: list[Function]
+) -> None:
+    """Walk statements collecting function definitions, building qualnames.
+
+    `outer` is the enclosing function's qualname once inside a function body;
+    while set, a nested class is skipped (local classes get no qualnames) and
+    any function found there scopes under "<locals>" with no class. `class_name`
+    is the enclosing class outside a function body, or None at module scope.
+    """
     match node.type:
         case "decorated_definition":
             names = [_decorator_name(d) for d in node.children if d.type == "decorator"]
-            _collect(node.child_by_field_name("definition"), module, class_name, names, found)
+            _collect(node.child_by_field_name("definition"), module, class_name, outer, names, found)
         case "function_definition":
-            scope = f"{module}.{class_name}" if class_name else module
-            fn = _function(node, module, class_name, decorators, scope)
+            if outer is not None:
+                scope, fn_class = f"{outer}.<locals>", None
+            else:
+                scope = f"{module}.{class_name}" if class_name else module
+                fn_class = class_name
+            fn = _function(node, module, fn_class, decorators, scope)
             found.append(fn)
-            _collect_nested(node.child_by_field_name("body"), module, fn.qualname, found)
+            _collect(node.child_by_field_name("body"), module, None, fn.qualname, [], found)
         case "class_definition":
+            if outer is not None:
+                return
             name = _text(node.child_by_field_name("name"))
             for child in node.child_by_field_name("body").children:
-                _collect(child, module, name, [], found)
+                _collect(child, module, name, None, [], found)
         case _ if node.type.endswith(("_statement", "_clause")) or node.type == "block":
             for child in node.named_children:
-                _collect(child, module, class_name, decorators, found)
-
-
-def _collect_nested(node: Node, module: str, outer: str, found: list[Function], decorators: list[str] | None = None) -> None:
-    match node.type:
-        case "decorated_definition":
-            names = [_decorator_name(d) for d in node.children if d.type == "decorator"]
-            _collect_nested(node.child_by_field_name("definition"), module, outer, found, names)
-        case "function_definition":
-            fn = _function(node, module, None, decorators or [], f"{outer}.<locals>")
-            found.append(fn)
-            _collect_nested(node.child_by_field_name("body"), module, fn.qualname, found)
-        case "class_definition":
-            return
-        case _:
-            for child in node.named_children:
-                _collect_nested(child, module, outer, found)
+                _collect(child, module, class_name, outer, decorators, found)
 
 
 def extract_functions(root: Node, module: str) -> list[Function]:
     found: list[Function] = []
     for child in root.named_children:
-        _collect(child, module, None, [], found)
+        _collect(child, module, None, None, [], found)
     top = _Builder()
     for child in root.named_children:
         top.statement(child)

@@ -106,7 +106,7 @@ def test_role_is_none_without_judgments(tmp_path, flow_files):
 
     main_module = next(m for m in data["modules"] if m["name"] == "app.main")
     assert main_module["role"] is None
-    assert main_module["capabilities"] == []
+    assert main_module["capabilities"] == ["reads_secrets"]
 
 
 def test_role_is_set_when_a_judgment_is_passed_in(tmp_path, flow_files):
@@ -115,19 +115,14 @@ def test_role_is_set_when_a_judgment_is_passed_in(tmp_path, flow_files):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     analysis = analyze(tmp_path, judge=False)
-    analysis.judgments = {
-        "app.main": Judgment(
-            role="business_logic",
-            role_confidence=0.9,
-            capabilities={"reads_secrets": 0.9, "handles_auth": 0.1},
-        )
-    }
+    analysis.judgments = {"app.main": Judgment(role="business_logic", handles_auth=0.9)}
+    analysis.capabilities["app.main"] = sorted({*analysis.capabilities["app.main"], "handles_auth"})
 
     data = to_json(analysis)
 
     main_module = next(m for m in data["modules"] if m["name"] == "app.main")
     assert main_module["role"] == "business_logic"
-    assert main_module["capabilities"] == ["reads_secrets"]
+    assert main_module["capabilities"] == ["handles_auth", "reads_secrets"]
 
 
 def test_cli_writes_a_valid_json_file_for_dash_o(tmp_path, flow_files, monkeypatch):
