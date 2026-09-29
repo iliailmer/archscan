@@ -94,17 +94,17 @@ def test_reports_show_coverage(full):
     coverage = compute_coverage(full)
     project = full.without_tests()
     build_call_graph(project)
-    html = render_html(project, {}, None, coverage=coverage)
+    html = render_html(project, {}, {}, None, coverage=coverage)
     assert 'data-tab="coverage"' in html and "Coverage</button>" in html
     assert "imported only" in html and "app.untouched" in html
     panel = html[html.index('id="coverage"'):]
     assert panel.index("app.untouched") < panel.index("app.a</code>")
-    md = render(project, {}, None, coverage=coverage)
+    md = render(project, {}, {}, None, coverage=coverage)
     assert "## Test coverage" in md
     assert "- `app.a` — covered (1/2)" in md
     assert "- `app.untouched` — not covered (0/1)" in md
-    assert 'data-tab="coverage"' not in render_html(project, {})
-    assert "## Test coverage" not in render(project, {})
+    assert 'data-tab="coverage"' not in render_html(project, {}, {})
+    assert "## Test coverage" not in render(project, {}, {})
 
 
 def test_reports_and_trace_skip_tests(build, flow_files):
@@ -114,8 +114,8 @@ def test_reports_and_trace_skip_tests(build, flow_files):
     project = full.without_tests()
     build_call_graph(project)
     result = trace(project, load_catalog())
-    html = render_html(project, {}, result)
-    md = render(project, {}, result)
+    html = render_html(project, {}, {}, result)
+    md = render(project, {}, {}, result)
     for text in (html, md):
         assert "tests.test_main" not in text
         assert "pytest" not in text

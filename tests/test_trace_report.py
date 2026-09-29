@@ -15,7 +15,7 @@ def traced(build, flow_files):
 
 def test_html_has_a_tab_per_active_source(build, flow_files):
     project, result = traced(build, flow_files)
-    html = render_html(project, {}, result)
+    html = render_html(project, {}, {}, result)
     assert 'data-tab="trace-env"' in html
     assert 'data-tab="trace-cli"' not in html
     assert "subprocess.run" in html
@@ -25,14 +25,14 @@ def test_html_has_a_tab_per_active_source(build, flow_files):
 
 def test_html_without_a_trace_has_only_the_structure_tab(build, flow_files):
     project = build(flow_files)
-    html = render_html(project, {})
+    html = render_html(project, {}, {})
     assert 'data-tab="structure"' in html
     assert 'data-tab="trace-' not in html
 
 
 def test_markdown_lists_findings(build, flow_files):
     project, result = traced(build, flow_files)
-    text = render(project, {}, result)
+    text = render(project, {}, {}, result)
     assert "## Data trace" in text
     assert "### env" in text
     assert "subprocess.run" in text
@@ -40,19 +40,19 @@ def test_markdown_lists_findings(build, flow_files):
 
 def test_module_lists_its_functions(build, flow_files):
     project, result = traced(build, flow_files)
-    html = render_html(project, {}, result)
+    html = render_html(project, {}, {}, result)
     assert "<details>" in html
     assert "main" in html
 
 
 def test_markdown_states_the_limits(build, flow_files):
     project, result = traced(build, flow_files)
-    assert LIMITS in render(project, {}, result)
+    assert LIMITS in render(project, {}, {}, result)
 
 
 def test_html_structure_tab_states_the_limits(build, flow_files):
     project = build(flow_files)
-    html = render_html(project, {})
+    html = render_html(project, {}, {})
     assert escape(LIMITS) in html.split('id="structure"')[1]
 
 
@@ -66,7 +66,7 @@ def test_unconnected_reached_module_is_drawn(build):
 
 
 def test_html_raises_the_mermaid_size_limits(build, flow_files):
-    html = render_html(build(flow_files), {})
+    html = render_html(build(flow_files), {}, {})
     assert "maxTextSize: 2000000" in html
     assert "maxEdges: 20000" in html
 
@@ -118,7 +118,7 @@ def test_nothing_reached_gives_no_diagram_and_a_message(build):
 
 def test_html_tab_has_toggle_count_and_lazy_full_diagram(build):
     project, result = _partial(build)
-    html = render_html(project, {}, result)
+    html = render_html(project, {}, {}, result)
     tab = html.split('id="trace-env"')[1]
     assert "Show all modules" in tab
     assert "Showing 2 of 5 modules." in tab
@@ -131,7 +131,7 @@ def test_html_tab_has_toggle_count_and_lazy_full_diagram(build):
 
 def test_markdown_has_only_the_reduced_diagram(build):
     project, result = _partial(build)
-    text = render(project, {}, result)
+    text = render(project, {}, {}, result)
     section = text.split("### env")[1]
     assert section.count("flowchart LR") == 1
     assert '["app.a"]' not in section

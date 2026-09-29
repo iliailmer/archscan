@@ -5,7 +5,6 @@ DEFAULT_SKIP_DIRS = frozenset({
     ".venv", "venv", "__pycache__", ".git", "node_modules", ".tox", "build", "dist",
     "doc", "docs", "benchmarks", "examples",
 })
-LOG_HIDDEN = frozenset({"__pycache__", "node_modules", "build", "dist", "venv"})
 
 
 def _names(section: dict, key: str) -> set[str]:

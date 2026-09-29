@@ -9,7 +9,12 @@ from archscan.trace_report import active_traces
 SCHEMA_VERSION = 1
 
 
-def module_entry(project: ProjectGraph, judgments: dict[str, Judgment], name: str) -> dict:
+def module_entry(
+    project: ProjectGraph,
+    judgments: dict[str, Judgment],
+    capabilities: dict[str, list[str]],
+    name: str,
+) -> dict:
     module = project.module(name)
     judgment = judgments.get(name)
     names = sorted(
@@ -19,7 +24,7 @@ def module_entry(project: ProjectGraph, judgments: dict[str, Judgment], name: st
         "name": name,
         "path": str(module.path),
         "role": judgment.role if judgment else None,
-        "capabilities": sorted(judgment.active_capabilities) if judgment else [],
+        "capabilities": capabilities.get(name, []),
         "entry_points": module.entry_points,
         "risks": module.risks,
         "imports": sorted(project.graph.successors(name)),
@@ -113,7 +118,7 @@ def to_json(analysis: Analysis) -> dict:
         "root": analysis.root.name,
         "summary": _summary(analysis),
         "modules": [
-            module_entry(project, analysis.judgments, name)
+            module_entry(project, analysis.judgments, analysis.capabilities, name)
             for name in sorted(m.name for m in project.modules())
         ],
         "functions": [

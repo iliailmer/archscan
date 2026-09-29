@@ -53,3 +53,23 @@ def test_bad_sources_toml_exits_with_message(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as info:
         main()
     assert str(info.value).startswith("Invalid sources.toml:")
+
+
+def test_without_with_jev_no_typesafe_client_is_created(tmp_path, monkeypatch, capsys):
+    from archscan import judge
+
+    def boom():
+        raise AssertionError("TypeSafeClient should not be created without --with-jev")
+
+    monkeypatch.setattr(judge, "TypeSafeClient", boom)
+    _run(tmp_path, monkeypatch, capsys, {"a.py": "def f():\n    return 1\n"})
+
+
+def test_with_jev_without_api_key_exits_with_message(tmp_path, monkeypatch):
+    (tmp_path / "a.py").write_text("def f():\n    return 1\n")
+    monkeypatch.setattr(sys, "argv", ["archscan", str(tmp_path), "--with-jev"])
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setattr("archscan.cli.load_dotenv", lambda: None)
+    with pytest.raises(SystemExit) as info:
+        main()
+    assert str(info.value) == "--with-jev needs TYPESAFE_API_KEY"

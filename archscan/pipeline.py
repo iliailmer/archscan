@@ -1,4 +1,3 @@
-import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,12 +5,13 @@ from pathlib import Path
 from loguru import logger
 
 from archscan.callgraph import build_call_graph
-from archscan.catalog import Catalog, load_catalog
+from archscan.capabilities import derive_capabilities
+from archscan.catalog import load_catalog
 from archscan.coverage import Coverage, compute_coverage
 from archscan.graph import ProjectGraph
-from archscan.judge import Judgment, TokenUsage, judge_project
+from archscan.judge import NOUL_THRESHOLD, Judgment, TokenUsage, judge_project
 from archscan.scan import python as python_scan
-from archscan.settings import LOG_HIDDEN, load_scan_settings
+from archscan.settings import load_scan_settings
 from archscan.trace import TraceResult, trace
 
 
@@ -20,14 +20,13 @@ class Analysis:
     root: Path
     full: ProjectGraph
     project: ProjectGraph
-    catalog: Catalog
     result: TraceResult
     coverage: Coverage | None
     judgments: dict[str, Judgment]
-    usage: TokenUsage | None
+    capabilities: dict[str, list[str]]
 
 
-def analyze(root: Path, *, only: str | None = None, judge: bool | None = None) -> Analysis:
+def analyze(root: Path, *, only: str | None = None, judge: bool = False) -> Analysis:
     root = root.resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"Not a directory: {root}")
@@ -42,7 +41,7 @@ def analyze(root: Path, *, only: str | None = None, judge: bool | None = None) -
         raise ValueError(f"Invalid archscan.toml: {error}") from error
 
     full = python_scan.scan(root, skip=skip)
-    shown = {d: n for d, n in full.skipped.items() if not d.startswith(".") and d not in LOG_HIDDEN}
+    shown = {d: n for d, n in full.skipped.items() if not d.startswith(".")}
     if shown:
         logger.info("Skipped {} files in: {}", sum(shown.values()), ", ".join(sorted(shown)))
     build_call_graph(full)
@@ -58,21 +57,18 @@ def analyze(root: Path, *, only: str | None = None, judge: bool | None = None) -
     if not result.converged:
         logger.warning("Trace did not converge; results may be incomplete.")
 
-    judgments: dict[str, Judgment] = {}
-    usage: TokenUsage | None = None
-    do_judge = bool(os.getenv("TYPESAFE_API_KEY")) if judge is None else judge
-    if do_judge:
-        judgments, usage = judge_project(project, catalog)
-        _log_usage(usage)
-    elif judge is None:
-        logger.warning("TYPESAFE_API_KEY not set. Skipping classification.")
+    capabilities = {m.name: derive_capabilities(project, catalog, m.name) for m in project.modules()}
 
-    return Analysis(root, full, project, catalog, result, coverage, judgments, usage)
+    judgments: dict[str, Judgment] = {}
+    if judge:
+        judgments, usage = judge_project(project)
+        _log_usage(usage)
+        for name, judgment in judgments.items():
+            if judgment.handles_auth >= NOUL_THRESHOLD:
+                capabilities[name] = sorted({*capabilities[name], "handles_auth"})
+
+    return Analysis(root, full, project, result, coverage, judgments, capabilities)
 
 
 def _log_usage(usage: TokenUsage) -> None:
-    message = f"Tokens: {usage.input_tokens} in, {usage.output_tokens} out, {usage.calls} calls"
-    price_in, price_out = os.getenv("ARCHSCAN_PRICE_IN"), os.getenv("ARCHSCAN_PRICE_OUT")
-    if price_in and price_out:
-        message += f". Estimated cost: ${usage.cost(float(price_in), float(price_out)):.4f}"
-    logger.info(message)
+    logger.info("Tokens: {} in, {} out, {} calls", usage.input_tokens, usage.output_tokens, usage.calls)

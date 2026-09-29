@@ -18,6 +18,7 @@ def test_analyze_returns_project_without_test_modules_and_env_trace(tmp_path, fl
     assert "tests.test_app" in {m.name for m in analysis.full.modules()}
     assert "tests.test_app" not in {m.name for m in analysis.project.modules()}
     assert analysis.judgments == {}
+    assert analysis.capabilities["app.main"] == ["reads_secrets"]
     assert "env" in analysis.result.traces
     findings = analysis.result.traces["env"].findings
     assert any(f.sink_call == "subprocess.run" for f in findings)

@@ -95,7 +95,7 @@ def module(a: Analysis, name: str, limit: int = DEFAULT_LIMIT) -> dict:
     resolved = _resolve(names, name, limit, kind="module")
     if isinstance(resolved, dict):
         return resolved
-    entry = module_entry(project, a.judgments, resolved)
+    entry = module_entry(project, a.judgments, a.capabilities, resolved)
     functions = sorted(
         (fn for fn in project.functions() if fn.module == resolved), key=lambda f: f.qualname
     )

@@ -63,8 +63,13 @@ def _analysis_for(path: str) -> Analysis | dict:
     if cached and cached[0] == signature:
         return cached[1]
 
+    want_jev = os.getenv("ARCHSCAN_WITH_JEV") == "1"
+    if want_jev and not os.getenv("TYPESAFE_API_KEY"):
+        logger.warning("ARCHSCAN_WITH_JEV=1 needs TYPESAFE_API_KEY; skipping Jev")
+        want_jev = False
+
     try:
-        analysis = analyze(root)
+        analysis = analyze(root, judge=want_jev)
     except (ValueError, NotADirectoryError) as error:
         return {"error": str(error)}
     except Exception as error:

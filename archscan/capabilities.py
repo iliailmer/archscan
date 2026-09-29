@@ -28,15 +28,20 @@ def _kinds(fn: Function, catalog: Catalog, bindings: dict[str, str]) -> set[str]
     return kinds
 
 
-def derive_capabilities(project: ProjectGraph, catalog: Catalog, module_name: str) -> dict[str, float]:
+def derive_capabilities(project: ProjectGraph, catalog: Catalog, module_name: str) -> list[str]:
+    """Return the active capability names for `module_name`, sorted."""
     bindings = project.module(module_name).bindings
     kinds: set[str] = set()
     for fn in project.functions():
         if fn.module == module_name:
             kinds |= _kinds(fn, catalog, bindings)
-    return {
-        "touches_db": float("database" in kinds),
-        "touches_network": float("network" in kinds),
-        "reads_user_input": float("cli" in kinds or "decorator:network" in kinds),
-        "reads_secrets": float("env" in kinds),
-    }
+    active = set()
+    if "database" in kinds:
+        active.add("touches_db")
+    if "network" in kinds:
+        active.add("touches_network")
+    if "cli" in kinds or "decorator:network" in kinds:
+        active.add("reads_user_input")
+    if "env" in kinds:
+        active.add("reads_secrets")
+    return sorted(active)
