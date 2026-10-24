@@ -3,3 +3,5 @@ __pycache__/
 .env
 .tasklist
 .tasklist.lock
+PLAN.md
+DESIGN.md
