@@ -67,9 +67,7 @@ def test_no_tests_module_anywhere(tmp_path, flow_files):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_main.py").write_text(
-        "from app.main import main\n\ndef test_main():\n    main()\n"
-    )
+    (tmp_path / "tests" / "test_main.py").write_text("from app.main import main\n\ndef test_main():\n    main()\n")
     analysis = analyze(tmp_path, judge=False)
 
     data = to_json(analysis)

@@ -7,15 +7,17 @@ from archscan.graph import ProjectGraph
 from archscan.judge import Judgment
 from archscan.trace import TraceResult
 from archscan.trace_report import (
+    LIMITS,
     active_traces,
     color_for,
     findings_md,
     functions_html,
-    node_id as _node_id,
-    LIMITS,
     page_html,
     source_mermaid,
     trace_tabs,
+)
+from archscan.trace_report import (
+    node_id as _node_id,
 )
 
 
@@ -147,9 +149,7 @@ def render_html(
             details = _details(project, capabilities, name)
             suffix = f" — {escape(details)}" if details else ""
             path = escape(str(project.module(name).path))
-            items.append(
-                f"<li><code>{escape(name)}</code> ({path}){suffix}{functions_html(project, name)}</li>"
-            )
+            items.append(f"<li><code>{escape(name)}</code> ({path}){suffix}{functions_html(project, name)}</li>")
         sections.append(f"<h3>{escape(role)}</h3><ul>{''.join(items)}</ul>")
     unconnected = "".join(
         f"<li><code>{escape(name)}</code> ({escape(str(project.module(name).path))})"
@@ -158,7 +158,7 @@ def render_html(
         for name in _unconnected(project)
     )
     third_party, stdlib = _dependencies(project)
-    rows ="".join(
+    rows = "".join(
         f"<tr><td><code>{escape(package)}</code></td><td>{len(users)}</td>"
         f"<td>{escape(', '.join(sorted(users)))}</td></tr>"
         for package, users in sorted(third_party.items(), key=lambda item: (-len(item[1]), item[0]))
@@ -176,7 +176,7 @@ def render_html(
 {escape(_mermaid(project, by_role))}
 </pre></div>
 <h2>Modules</h2>
-{''.join(sections)}
+{"".join(sections)}
 {dependencies}
 <p>{escape(LIMITS)}</p>"""
     tabs = trace_tabs(project, result)

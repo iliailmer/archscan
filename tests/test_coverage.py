@@ -97,7 +97,7 @@ def test_reports_show_coverage(full):
     html = render_html(project, {}, {}, None, coverage=coverage)
     assert 'data-tab="coverage"' in html and "Coverage</button>" in html
     assert "imported only" in html and "app.untouched" in html
-    panel = html[html.index('id="coverage"'):]
+    panel = html[html.index('id="coverage"') :]
     assert panel.index("app.untouched") < panel.index("app.a</code>")
     md = render(project, {}, {}, None, coverage=coverage)
     assert "## Test coverage" in md

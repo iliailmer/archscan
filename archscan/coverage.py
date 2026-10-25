@@ -34,7 +34,10 @@ class Coverage:
 def _reach(project: ProjectGraph) -> dict[str, bool]:
     """Map each reached non-test function to whether some path to it is certain."""
     test_modules = {m.name for m in project.modules() if m.is_test}
-    is_test_fn = lambda q: project.function(q).module in test_modules
+
+    def is_test_fn(q):
+        return project.function(q).module in test_modules
+
     reached: dict[str, bool] = {}
     queue: list[tuple[str, bool]] = [(f.qualname, True) for f in project.functions() if f.module in test_modules]
     seen = {(q, c) for q, c in queue}
@@ -91,7 +94,7 @@ def coverage_tab(coverage: Coverage | None) -> tuple[str, str, str] | None:
         f"<p>{escape(coverage.summary())}</p>"
         "<table><tr><th>Module</th><th>Status</th><th>Covered</th><th>Not reached</th></tr>"
         f"{rows}</table>"
-        "<p>Guessed calls count as \"maybe\". The known limits of the trace apply.</p>"
+        '<p>Guessed calls count as "maybe". The known limits of the trace apply.</p>'
     )
     return "coverage", "Coverage", body
 
