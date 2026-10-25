@@ -17,9 +17,7 @@ def module_entry(
 ) -> dict:
     module = project.module(name)
     judgment = judgments.get(name)
-    names = sorted(
-        fn.qualname.removeprefix(f"{name}.") for fn in project.functions() if fn.module == name
-    )
+    names = sorted(fn.qualname.removeprefix(f"{name}.") for fn in project.functions() if fn.module == name)
     return {
         "name": name,
         "path": str(module.path),
@@ -83,9 +81,7 @@ def trace_entry(project: ProjectGraph, trace: SourceTrace) -> dict:
 def _summary(analysis: Analysis) -> dict:
     project = analysis.project
     third_party, _ = _dependencies(project)
-    entry_points = sorted(
-        (module.name, entry) for module in project.modules() for entry in module.entry_points
-    )
+    entry_points = sorted((module.name, entry) for module in project.modules() for entry in module.entry_points)
     traces = active_traces(analysis.result)
     return {
         "modules": project.graph.number_of_nodes(),
@@ -93,10 +89,7 @@ def _summary(analysis: Analysis) -> dict:
         "dependencies": project.graph.number_of_edges(),
         "test_modules": analysis.full.graph.number_of_nodes() - project.graph.number_of_nodes(),
         "entry_points": [{"module": module, "entry": entry} for module, entry in entry_points],
-        "third_party": [
-            {"package": package, "modules": len(users)}
-            for package, users in sorted(third_party.items())
-        ],
+        "third_party": [{"package": package, "modules": len(users)} for package, users in sorted(third_party.items())],
         "findings": {t.kind: len(t.findings) for t in traces if t.findings},
         "converged": analysis.result.converged,
     }
@@ -121,13 +114,7 @@ def to_json(analysis: Analysis) -> dict:
             module_entry(project, analysis.judgments, analysis.capabilities, name)
             for name in sorted(m.name for m in project.modules())
         ],
-        "functions": [
-            function_entry(project, fn)
-            for fn in sorted(project.functions(), key=lambda f: f.qualname)
-        ],
-        "traces": [
-            trace_entry(project, t)
-            for t in sorted(active_traces(analysis.result), key=lambda t: t.kind)
-        ],
+        "functions": [function_entry(project, fn) for fn in sorted(project.functions(), key=lambda f: f.qualname)],
+        "traces": [trace_entry(project, t) for t in sorted(active_traces(analysis.result), key=lambda t: t.kind)],
         "coverage": _coverage_entries(analysis.coverage),
     }

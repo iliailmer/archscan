@@ -31,9 +31,9 @@ STYLE = """
   .guess { color: #888; }
 """
 
-SCRIPT = """
-import mermaid from "%s";
-mermaid.initialize({ startOnLoad: false, securityLevel: "strict", maxTextSize: 2000000, maxEdges: 20000 });
+SCRIPT = (
+    f'\nimport mermaid from "{MERMAID_ESM_URL}";\n'
+    + """mermaid.initialize({ startOnLoad: false, securityLevel: "strict", maxTextSize: 2000000, maxEdges: 20000 });
 const rendered = new Set();
 async function show(id) {
   document.querySelectorAll(".tab").forEach(t => { t.hidden = t.id !== id; });
@@ -58,7 +58,8 @@ document.querySelectorAll("button.toggle").forEach(button => button.addEventList
 }));
 document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => show(b.dataset.tab)));
 show("structure");
-""" % MERMAID_ESM_URL
+"""
+)
 
 
 def node_id(name: str) -> str:
@@ -135,7 +136,7 @@ def findings_html(trace: SourceTrace) -> str:
     if not trace.findings:
         return "<p>No findings.</p>"
     rows = "".join(
-        f"<tr class=\"{'' if f.certain else 'guess'}\">"
+        f'<tr class="{"" if f.certain else "guess"}">'
         f"<td>{escape(f.source)} → {escape(f.sink)} (<code>{escape(f.sink_call)}</code>)</td>"
         f"<td><code>{escape(f.function)}</code> line {f.line}</td>"
         f"<td>{escape(' → '.join(f.path))}</td>"
@@ -156,7 +157,9 @@ def findings_md(trace: SourceTrace) -> list[str]:
 
 
 def functions_html(project: ProjectGraph, module_name: str) -> str:
-    names = sorted(fn.qualname.removeprefix(f"{module_name}.") for fn in project.functions() if fn.module == module_name)
+    names = sorted(
+        fn.qualname.removeprefix(f"{module_name}.") for fn in project.functions() if fn.module == module_name
+    )
     if not names:
         return ""
     items = "".join(f"<li><code>{escape(n)}</code></li>" for n in names)
@@ -178,7 +181,7 @@ def trace_tabs(project: ProjectGraph, result: TraceResult | None) -> list[tuple[
                 'data-show-reached="Show only reached modules">Show all modules</button>'
                 f'<div class="diagram reduced"><pre class="mermaid">\n{escape(reduced)}\n</pre></div>'
                 '<div class="diagram full" hidden>'
-                f'<pre class="mermaid" data-lazy>\n{escape(source_mermaid(project, trace, color, only_reached=False))}\n</pre></div>'
+                f'<pre class="mermaid" data-lazy>\n{escape(full)}\n</pre></div>'
             )
         else:
             diagrams = "<p>No modules reached by this source.</p>"

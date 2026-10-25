@@ -30,23 +30,26 @@ def test_reached_functions_and_edges(build, flow_files):
 
 
 def test_unresolved_call_makes_the_path_a_guess(build):
-    project = build({
-        "g.py": dedent("""\
+    project = build(
+        {
+            "g.py": dedent("""\
             import os
 
             def f():
                 v = str(os.getenv("K"))
                 eval(v)
             """),
-    })
+        }
+    )
     finding = run_trace(project).traces["env"].findings[0]
     assert finding.sink == "process"
     assert finding.certain is False
 
 
 def test_class_attribute_flow_is_a_guess(build):
-    project = build({
-        "job.py": dedent("""\
+    project = build(
+        {
+            "job.py": dedent("""\
             import os
             import subprocess
 
@@ -57,15 +60,17 @@ def test_class_attribute_flow_is_a_guess(build):
                 def run(self):
                     subprocess.run(self.cmd)
             """),
-    })
+        }
+    )
     finding = run_trace(project).traces["env"].findings[0]
     assert finding.function == "job.Job.run"
     assert finding.certain is False
 
 
 def test_decorated_handler_parameters_are_network_sources(build):
-    project = build({
-        "web.py": dedent("""\
+    project = build(
+        {
+            "web.py": dedent("""\
             import subprocess
             from fastapi import FastAPI
 
@@ -75,14 +80,16 @@ def test_decorated_handler_parameters_are_network_sources(build):
             def run(cmd):
                 subprocess.run(cmd)
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["network"].findings
     assert [(f.sink, f.certain) for f in findings] == [("process", True)]
 
 
 def test_recursion_terminates(build):
-    project = build({
-        "r.py": dedent("""\
+    project = build(
+        {
+            "r.py": dedent("""\
             import os
 
             def f(x, n):
@@ -93,7 +100,8 @@ def test_recursion_terminates(build):
             def g():
                 eval(f(os.getenv("A"), 3))
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert [(f.sink, f.certain) for f in findings] == [("process", True)]
 
@@ -115,8 +123,9 @@ def test_long_call_chain_converges(build):
 
 
 def test_env_survives_loop_carried_assignments(build):
-    project = build({
-        "loop.py": dedent("""\
+    project = build(
+        {
+            "loop.py": dedent("""\
             import os
             import subprocess
 
@@ -126,7 +135,8 @@ def test_env_survives_loop_carried_assignments(build):
                     z0 = z1
                     z1 = os.getenv("X")
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert [(f.sink, f.function) for f in findings] == [("process", "loop.main")]
 
@@ -167,8 +177,9 @@ def test_guessed_visit_does_not_hide_certain_visit(build):
 
 
 def test_keyword_argument_passes_through(build):
-    project = build({
-        "k.py": dedent("""\
+    project = build(
+        {
+            "k.py": dedent("""\
             import os
             import subprocess
 
@@ -178,28 +189,32 @@ def test_keyword_argument_passes_through(build):
             def start():
                 runner(cmd=os.getenv("X"))
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert [(f.function, f.certain) for f in findings] == [("k.runner", True)]
 
 
 def test_sink_without_source_has_no_finding(build):
-    project = build({
-        "n.py": dedent("""\
+    project = build(
+        {
+            "n.py": dedent("""\
             import subprocess
 
             def f():
                 cmd = "ls"
                 subprocess.run(cmd)
             """),
-    })
+        }
+    )
     result = run_trace(project)
     assert all(not t.findings for t in result.traces.values())
 
 
 def test_container_argument_is_a_guess(build):
-    project = build({
-        "c.py": dedent("""\
+    project = build(
+        {
+            "c.py": dedent("""\
             import os
             import subprocess
 
@@ -211,14 +226,16 @@ def test_container_argument_is_a_guess(build):
                 cmd = os.getenv("X")
                 subprocess.run(cmd)
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert {f.function: f.certain for f in findings} == {"c.listed": False, "c.plain": True}
 
 
 def test_finding_path_has_no_repeated_function(build):
-    project = build({
-        "m.py": dedent("""\
+    project = build(
+        {
+            "m.py": dedent("""\
             import subprocess
             import sys
 
@@ -230,7 +247,8 @@ def test_finding_path_has_no_repeated_function(build):
                 b = echo(a)
                 subprocess.run(b)
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["cli"].findings
     assert findings
     for f in findings:
@@ -238,8 +256,9 @@ def test_finding_path_has_no_repeated_function(build):
 
 
 def test_two_callers_of_one_sink_are_two_findings(build):
-    project = build({
-        "m.py": dedent("""\
+    project = build(
+        {
+            "m.py": dedent("""\
             import os
             import subprocess
 
@@ -252,15 +271,17 @@ def test_two_callers_of_one_sink_are_two_findings(build):
             def two():
                 sink(os.getenv("A"))
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert len(findings) == 2
     assert len({f.path for f in findings}) == 2
 
 
 def test_two_sink_calls_on_one_line_are_two_findings(build):
-    project = build({
-        "m.py": dedent("""\
+    project = build(
+        {
+            "m.py": dedent("""\
             import os
             import subprocess
 
@@ -268,15 +289,17 @@ def test_two_sink_calls_on_one_line_are_two_findings(build):
                 v = os.getenv("A")
                 subprocess.run(v) if flag else os.system(v)
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert {f.sink_call for f in findings} == {"subprocess.run", "os.system"}
     assert len(findings) == 2
 
 
 def test_chained_assignment_is_tracked(build):
-    project = build({
-        "m.py": dedent("""\
+    project = build(
+        {
+            "m.py": dedent("""\
             import os
             import subprocess
 
@@ -284,30 +307,34 @@ def test_chained_assignment_is_tracked(build):
                 a = b = os.environ["X"]
                 subprocess.run(b)
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert findings
     assert findings[0].sink_call == "subprocess.run"
 
 
 def test_comprehension_variable_is_tracked(build):
-    project = build({
-        "m.py": dedent("""\
+    project = build(
+        {
+            "m.py": dedent("""\
             import os
             import subprocess
 
             def f():
                 [subprocess.run(x) for x in os.environ["Y"].split(",")]
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert findings
     assert findings[0].certain is False
 
 
 def test_nested_function_flow_is_reported(build):
-    project = build({
-        "m.py": dedent("""\
+    project = build(
+        {
+            "m.py": dedent("""\
             import os
             import subprocess
 
@@ -315,6 +342,7 @@ def test_nested_function_flow_is_reported(build):
                 def inner():
                     subprocess.run(os.getenv("CMD"))
             """),
-    })
+        }
+    )
     findings = run_trace(project).traces["env"].findings
     assert [f.function for f in findings] == ["m.outer.<locals>.inner"]

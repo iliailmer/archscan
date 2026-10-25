@@ -41,9 +41,7 @@ def analysis(tmp_path, query_files):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
     (tmp_path / "tests").mkdir()
-    (tmp_path / "tests" / "test_main.py").write_text(
-        "from app.main import main\n\ndef test_main():\n    main()\n"
-    )
+    (tmp_path / "tests" / "test_main.py").write_text("from app.main import main\n\ndef test_main():\n    main()\n")
     return analyze(tmp_path, judge=False)
 
 

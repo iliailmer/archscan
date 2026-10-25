@@ -96,9 +96,7 @@ def module(a: Analysis, name: str, limit: int = DEFAULT_LIMIT) -> dict:
     if isinstance(resolved, dict):
         return resolved
     entry = module_entry(project, a.judgments, a.capabilities, resolved)
-    functions = sorted(
-        (fn for fn in project.functions() if fn.module == resolved), key=lambda f: f.qualname
-    )
+    functions = sorted((fn for fn in project.functions() if fn.module == resolved), key=lambda f: f.qualname)
     entry["functions"] = [
         {
             "name": fn.qualname.removeprefix(f"{resolved}."),
@@ -118,10 +116,7 @@ def _call_edges(a: Analysis, function: str, limit: int, *, direction: str) -> di
     edges = calls.in_edges(resolved, data=True) if direction == "in" else calls.out_edges(resolved, data=True)
     other = (lambda u, v: u) if direction == "in" else (lambda u, v: v)
     items = sorted(
-        (
-            {"function": other(u, v), "certain": not data.get("guess", False)}
-            for u, v, data in edges
-        ),
+        ({"function": other(u, v), "certain": not data.get("guess", False)} for u, v, data in edges),
         key=lambda e: e["function"],
     )
     key = "callers" if direction == "in" else "callees"

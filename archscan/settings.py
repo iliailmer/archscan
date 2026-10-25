@@ -1,10 +1,22 @@
 import tomllib
 from pathlib import Path
 
-DEFAULT_SKIP_DIRS = frozenset({
-    ".venv", "venv", "__pycache__", ".git", "node_modules", ".tox", "build", "dist",
-    "doc", "docs", "benchmarks", "examples",
-})
+DEFAULT_SKIP_DIRS = frozenset(
+    {
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".git",
+        "node_modules",
+        ".tox",
+        "build",
+        "dist",
+        "doc",
+        "docs",
+        "benchmarks",
+        "examples",
+    }
+)
 
 
 def _names(section: dict, key: str) -> set[str]:

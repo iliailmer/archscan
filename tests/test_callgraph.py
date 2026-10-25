@@ -10,10 +10,11 @@ def test_qualify_expands_the_head_name():
 
 
 def test_resolves_imports_methods_and_constructors(build):
-    project = build({
-        "app/__init__.py": "",
-        "app/util.py": "def helper(x):\n    return x\n",
-        "app/model.py": dedent("""\
+    project = build(
+        {
+            "app/__init__.py": "",
+            "app/util.py": "def helper(x):\n    return x\n",
+            "app/model.py": dedent("""\
             class Model:
                 def __init__(self, cfg):
                     self.cfg = cfg
@@ -24,7 +25,7 @@ def test_resolves_imports_methods_and_constructors(build):
                 def step(self):
                     return 1
             """),
-        "app/main.py": dedent("""\
+            "app/main.py": dedent("""\
             from app import util
             from app.util import helper as h
             from app.model import Model
@@ -35,7 +36,8 @@ def test_resolves_imports_methods_and_constructors(build):
                 m = Model(3)
                 m.run()
             """),
-    })
+        }
+    )
     build_call_graph(project)
     edges = {(a, b): d["guess"] for a, b, d in project.calls.edges(data=True)}
     assert edges[("app.main.main", "app.util.helper")] is False
@@ -45,11 +47,12 @@ def test_resolves_imports_methods_and_constructors(build):
 
 
 def test_sibling_script_imports_and_reexports(build):
-    project = build({
-        "pkg/__init__.py": "from pkg.core import work\n",
-        "pkg/core.py": "def work():\n    pass\n",
-        "scripts/_common.py": "def load():\n    pass\n",
-        "scripts/run.py": dedent("""\
+    project = build(
+        {
+            "pkg/__init__.py": "from pkg.core import work\n",
+            "pkg/core.py": "def work():\n    pass\n",
+            "scripts/_common.py": "def load():\n    pass\n",
+            "scripts/run.py": dedent("""\
             from _common import load
             from pkg import work
 
@@ -57,7 +60,8 @@ def test_sibling_script_imports_and_reexports(build):
                 load()
                 work()
             """),
-    })
+        }
+    )
     build_call_graph(project)
     edges = {(a, b): d["guess"] for a, b, d in project.calls.edges(data=True)}
     assert edges[("scripts.run.go", "scripts._common.load")] is False

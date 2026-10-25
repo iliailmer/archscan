@@ -57,9 +57,11 @@ def test_html_structure_tab_states_the_limits(build, flow_files):
 
 
 def test_unconnected_reached_module_is_drawn(build):
-    project = build({
-        "solo.py": "import os\nimport subprocess\n\ndef f():\n    subprocess.run(os.getenv('X'))\n",
-    })
+    project = build(
+        {
+            "solo.py": "import os\nimport subprocess\n\ndef f():\n    subprocess.run(os.getenv('X'))\n",
+        }
+    )
     build_call_graph(project)
     env = trace(project, load_catalog()).traces["env"]
     assert '["solo"]' in source_mermaid(project, env, "#2ca02c")
@@ -72,17 +74,19 @@ def test_html_raises_the_mermaid_size_limits(build, flow_files):
 
 
 def _edge_lines(mermaid):
-    return [l.strip() for l in mermaid.splitlines() if " --> " in l]
+    return [line.strip() for line in mermaid.splitlines() if " --> " in line]
 
 
 def _partial(build):
-    project = build({
-        "app/__init__.py": "",
-        "app/main.py": "import os\nfrom app.runner import run\n\ndef main():\n    run(os.getenv('CMD'))\n",
-        "app/runner.py": "import subprocess\n\ndef run(cmd):\n    subprocess.run(cmd, shell=True)\n",
-        "app/a.py": "from app import b\n",
-        "app/b.py": "X = 1\n",
-    })
+    project = build(
+        {
+            "app/__init__.py": "",
+            "app/main.py": "import os\nfrom app.runner import run\n\ndef main():\n    run(os.getenv('CMD'))\n",
+            "app/runner.py": "import subprocess\n\ndef run(cmd):\n    subprocess.run(cmd, shell=True)\n",
+            "app/a.py": "from app import b\n",
+            "app/b.py": "X = 1\n",
+        }
+    )
     build_call_graph(project)
     return project, trace(project, load_catalog())
 
@@ -105,7 +109,11 @@ def test_link_style_indexes_match_emitted_edges(build):
     for only_reached in (True, False):
         text = source_mermaid(project, env, "#2ca02c", only_reached=only_reached)
         edges = _edge_lines(text)
-        styled = [int(l.split()[1]) for l in text.splitlines() if l.strip().startswith("linkStyle") and l.split()[1].isdigit()]
+        styled = [
+            int(line.split()[1])
+            for line in text.splitlines()
+            if line.strip().startswith("linkStyle") and line.split()[1].isdigit()
+        ]
         assert styled and all(i < len(edges) for i in styled)
         assert {edges[i] for i in styled} == {"n_app_main --> n_app_runner"}
 
@@ -122,7 +130,7 @@ def test_html_tab_has_toggle_count_and_lazy_full_diagram(build):
     tab = html.split('id="trace-env"')[1]
     assert "Show all modules" in tab
     assert "Showing 2 of 5 modules." in tab
-    assert "<pre class=\"mermaid\" data-lazy>" in tab
+    assert '<pre class="mermaid" data-lazy>' in tab
     assert tab.count("flowchart LR") == 2
     assert ".mermaid:not([data-lazy])" in html
     assert "Show only reached modules" in html

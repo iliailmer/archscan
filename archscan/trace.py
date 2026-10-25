@@ -183,9 +183,7 @@ class _FunctionPass:
     def _call(self, index: int, op: CallOp) -> None:
         fn, state = self.fn, self.state
         args = [self._read_all(names, guess=i in op.guess_args) for i, names in enumerate(op.args)]
-        kwargs = {
-            name: self._read_all(names, guess=name in op.guess_kwargs) for name, names in op.kwargs
-        }
+        kwargs = {name: self._read_all(names, guess=name in op.guess_kwargs) for name, names in op.kwargs}
         receiver = self._labels_of(op.receiver) if op.receiver else {}
         state.call_args[(fn.qualname, index)] = (args, kwargs)
 
@@ -226,7 +224,9 @@ class _FunctionPass:
                 for source, source_taint in bound.get(int(hit.label[1:]), {}).items():
                     certain = source_taint.certain and hit.taint.certain and not target.guess
                     trail = _join(source_taint.trail, hit.taint.trail)
-                    mapped = SinkHit(source, hit.sink_kind, hit.sink_call, hit.function, hit.line, Taint(certain, trail))
+                    mapped = SinkHit(
+                        source, hit.sink_kind, hit.sink_call, hit.function, hit.line, Taint(certain, trail)
+                    )
                     if _record_hit(self.summary, mapped):
                         self.changed = True
         if _merge(self.env.setdefault(op.target, {}), result):
