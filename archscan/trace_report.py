@@ -175,6 +175,7 @@ def trace_tabs(project: ProjectGraph, result: TraceResult | None) -> list[tuple[
         if reduced:
             total = project.graph.number_of_nodes()
             shown = len(shown_modules(project, trace))
+            full = source_mermaid(project, trace, color, only_reached=False)
             diagrams = (
                 f"<p>Showing {shown} of {total} modules.</p>"
                 '<button class="toggle" type="button" data-show-all="Show all modules" '
